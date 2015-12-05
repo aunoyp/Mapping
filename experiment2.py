@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from collections import OrderedDict
+import copy
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
@@ -10,33 +11,6 @@ import pickle
 import scipy as sp
 import scipy.optimize
 import scipy.signal
-import scipy.io
-
-#import matplotlib
-#matplotlib.use('agg')
-#matplotlib.font_manager.fontManager.defaultFont['ttf'] = \
-#'/Users/cjpeck/anaconda/lib/python3.4/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
-#plt.figure
-#plt.scatter([1,2,3], [1,2,3])
-#h = plt.gca()
-#fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
-#              'mapping_py/mapping/figs/'
-#plt.savefig(fig_dir + 'test.pdf')
-
-#plt.rcdefaults()
-
-#plt.rc('font', **{'family':'fantasy'})
-
-#plt.rc('font', family='sans-serif') 
-#plt.rc('font', serif='Helvetica') 
-#plt.rc('text', usetex='false') 
-
-#plt.rcParams['font.sans-serif'] = ['Helvetica']
-#plt.rcParams['font.sans-serif'].remove('Helvetica')
-#plt.rcParams['font.sans-serif'].insert(0, 'Helvetica')
-#plt.rcParams['font.sans-serif'].remove('Bitstream Vera Sans')
-
-
 
 '''
 Git command line:
@@ -221,9 +195,17 @@ class Neuron(object):
         self.frmean_space = None
         
         # fit parameters for 2d gaussian
-        self.fit_type = 'basinhop'
+        self.param_labels = ['ux', 'uy', 'stdx_nr', 'stdy_nr', 'stdx_rw', 
+                             'stdy_rw', 'minfr_nr', 'maxfr_nr', 'minfr_rw', 
+                             'maxfr_rw']        
+        self.lb = [-40, -40, 0, 0, 0,
+                   0, 0, 0, 0,
+                   0]
+        self.ub = [40, 40, 100, 100, 100, 
+                   100, 200, 200, 200,
+                   200]
         self.betas = None
-        
+
         # plotting params for 2d gaussians
         self.xy_max = 20
         self.plot_density = 10 #points per degree
@@ -249,10 +231,6 @@ class Neuron(object):
         else:
             print('cant determine which side is conta')
 
-        #parameters for gaussian fit
-        self.param_labels = ['ux', 'uy', 'stdx_nr', 'stdy_nr', 'stdx_rw', 
-                             'stdy_rw', 'minfr_nr', 'maxfr_nr', 'minfr_rw', 
-                             'maxfr_rw']
         # get the the data            
         self.process(f, fname, cellname)
         
@@ -542,78 +520,71 @@ class Neuron(object):
         #ind of max firing rate across reward conditions
         ind = np.argmax(z)    
         
-        self.betas[0] = x[ind]
-        self.betas[1] = y[ind]
-        self.betas[2] = 4
-        self.betas[3] = 4
-        self.betas[4] = 4
-        self.betas[5] = 4
-        self.betas[6] = np.nanmin(z0)
-        self.betas[7] = np.nanmax(z0) - np.nanmin(z0)
-        self.betas[8] = np.nanmin(z1)
-        self.betas[9] = np.nanmax(z1) - np.nanmin(z1)
 #        self.betas[0] = x[ind]
 #        self.betas[1] = y[ind]
 #        self.betas[2] = 4
 #        self.betas[3] = 4
 #        self.betas[4] = 4
 #        self.betas[5] = 4
-#        self.betas[6] = 0
-#        self.betas[7] = np.nanmean(z0)
-#        self.betas[8] = 0
-#        self.betas[9] = np.nanmean(z1)
+#        self.betas[6] = np.nanmin(z0)
+#        self.betas[7] = np.nanmax(z0) - np.nanmin(z0)
+#        self.betas[8] = np.nanmin(z1)
+#        self.betas[9] = np.nanmax(z1) - np.nanmin(z1)
+        self.betas[0] = x[ind]
+        self.betas[1] = y[ind]
+        self.betas[2] = 20
+        self.betas[3] = 20
+        self.betas[4] = 20
+        self.betas[5] = 20
+        self.betas[6] = 0
+        self.betas[7] = np.nanmean(z0)
+        self.betas[8] = 0
+        self.betas[9] = np.nanmean(z1)
         
     def error_func(self, betas0):
         ''' error function of fitted 2d gaussian. 
         '''
+        if np.any(betas0 < self.lb) or np.any(betas0 > self.ub):
+            return np.inf
         x = np.ravel(self.x_grid)
         y = np.ravel(self.y_grid)
         z0 = np.ravel(self.frmean_space[0])
-        z1 = np.ravel(self.frmean_space[1])
-        
-        x_oob = betas0[0] < -40 or betas0[0] > 40
-        y_oob = betas0[1] < -40 or betas0[1] > 40
-        stdx_oob = betas0[2] < 0 or betas0[4] < 0
-        stdy_oob = betas0[3] < 0 or betas0[5] < 0
-        min_oob = betas0[6] < 0 or betas0[8] < 0
-        max_oob = betas0[7] > 400 or betas0[9] > 400
-        oob = x_oob or y_oob or stdx_oob or stdy_oob or min_oob or max_oob
-        if oob:
-            if self.fit_type == 'lsq':
-                return np.r_[np.full_like(z0, np.inf), np.full_like(z1, np.inf)]  
-            elif self.fit_type == 'basinhop':
-                return np.inf                
-        if self.fit_type == 'lsq':
-            return np.r_[z0 - self.get_gauss(x, y, 0, betas0), 
-                         z1 - self.get_gauss(x, y, 1, betas0)]
-        elif self.fit_type == 'basinhop':
-            return np.nansum(np.r_[z0 - neuron.get_gauss(x, y, 0, betas0), 
+        z1 = np.ravel(self.frmean_space[1])        
+        return np.nansum(np.r_[z0 - neuron.get_gauss(x, y, 0, betas0), 
                                z1 - neuron.get_gauss(x, y, 1, betas0)] ** 2)
 
     def fit_gaussian(self):
-        print(self.fit_type)
-        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : START')
-        if self.fit_type == 'lsq':
-            self.betas, _ = sp.optimize.leastsq(self.error_func, self.betas)   
-        elif self.fit_type == 'basinhop':            
-            results = sp.optimize.basinhopping(self.error_func, self.betas, 
-                                               disp=True, 
-                                               callback=self.print_fun, 
-                                               take_step=self.take_step)  
-            self.betas = results.x
+        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : START')           
+        results = sp.optimize.basinhopping(self.error_func, self.betas, 
+                                           disp=False, 
+                                           callback=self.print_fun, 
+                                           take_step=self.take_step, 
+                                           accept_test=self.eval_fit)  
+        self.betas = results.x
         print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : FINISH')
     
-    def take_step(self, step):
-        step[0:2] += np.random.uniform(-10, 10, step[0:2].shape)
-        step[2:6] += np.random.uniform(-10, 10, step[2:6].shape)
-        step[6:] += np.random.uniform(-20, 20, step[6:].shape)
-        #print('%.2f\t' * len(step) %tuple(step))
-        return step
+    def take_step(self, x0):        
+        xy_inds = [('ux' in label) or ('uy' in label) for label in 
+                   neuron.param_labels]
+        std_inds = ['std' in label for label in neuron.param_labels]        
+        min_inds = ['minfr' in label for label in neuron.param_labels]
+        max_inds = ['maxfr' in label for label in neuron.param_labels]
+        x = copy.copy(x0)
+        x[np.where(xy_inds)] = np.random.uniform(-20, 20, np.sum(xy_inds))
+        x[np.where(std_inds)] = np.random.uniform(1, 80, np.sum(std_inds))
+        x[np.where(min_inds)] = np.random.uniform(1, 100, np.sum(min_inds))
+        x[np.where(max_inds)] = np.random.uniform(1, 100, np.sum(max_inds))
+        return x
         
     def print_fun(self, x, f, accepted):
-        if not np.isinf(f):
+        if not np.isinf(f):# and accepted == 1:
             print('%.2f\t' * len(x) %tuple(x))
             print('   f = %1.2f, accepted = %d' %(f, accepted))
+            
+    def eval_fit(self, f_new, x_new, f_old, x_old):
+        accept = (np.all(x_new >= self.lb) and np.all(x_new <= self.ub) and
+                  f_new < f_old)
+        return bool(accept)
     
     def get_xy(self):
         ''' all possible x and y locations of the stimuli'''
@@ -813,8 +784,8 @@ class Neuron(object):
         fig.tight_layout()
         fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
                   'mapping_py/mapping/figs/'
-        plt.savefig(fig_dir + neuron.filename + '_' + neuron.name + '_' + 
-                    self.fit_type + '.pdf', bbox_inches='tight')
+        plt.savefig(fig_dir + neuron.filename + '_' + neuron.name + 
+                    '.pdf', bbox_inches='tight')
         plt.show()
         
     ### ANALYSIS FUNCTIONS
@@ -947,106 +918,14 @@ if __name__ == '__main__':
             
             min_pos, max_pos = neuron.define_hot_spot()
             neuron.plot_hot_spot(min_pos, max_pos)                
-    
-            #compare basinhop vs. lsq        
-            neuron.fit_type = 'lsq'
-            neuron.get_initial_params()
-            neuron.fit_gaussian()
-            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, neuron.betas)
-            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
             
-            neuron.fit_type = 'basinhop'
             neuron.get_initial_params()
             neuron.fit_gaussian()
             g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, neuron.betas)
             g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, neuron.betas)        
             neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
-            break
-        break
+
     error = neuron.error_func(neuron.betas)
-    
-    
-    #option for constraining STD estimates
-
-
-#    io = LoadData()
-#    for file in io.experiment.files:
-#        for cell in io.experiment.files[file]:
-#            neuron = io.load_neuron(file, cell)
-#            neuron.psth_map()    
-#            min_pos, max_pos = neuron.define_hot_spot((.1, .5))
-#            neuron.plot_hot_spot(min_pos, max_pos)    
-#            break
-#        break            
-    
-    # test smooth firing rates procedure    
-#    neuron.smooth_firing_rates(10, 1)    
-#    t0 = np.mean(np.c_[neuron.tStart, neuron.tEnd],1)
-#    t1 = np.mean(np.c_[neuron.tStart_smooth, neuron.tEnd_smooth],1)
-#    fr0 = np.nanmean(neuron.fr, 0)
-#    fr1 = np.nanmean(neuron.fr_smooth, 0)
-#    plt.figure()
-#    plt.plot(t0, fr0)
-#    plt.plot(t1, fr1)
-#    plt.show()
-                          
-#    # add neuron by file  
-#    overwrite = True
-#    exp = Experiment(overwrite)
-#    for iFile, file in enumerate(finfo['filenames']):
-#        # load file
-#        f = sp.io.loadmat(directory + file + '.nex.mat', squeeze_me=True)
-#        print('Loaded file', file)
-#        cells = finfo['cell_name'][finfo['file_ind'] == iFile]             
-#        exp.add_session(f, file, cells)        
-#    exp.save_experiment()              
-        
-#    # a test
-#    n = Neuron(f, file, cells[0])
-#    for iTrial in range(60):
-#        if iTrial in n.df.index:
-#            print(iTrial, len(n.df['spkdata'].loc[iTrial]), 'spikes')
-#        else:
-#            print(iTrial, 'not in DataFrame')
-
-#    # Query time
-#    s = set()
-#    l = []
-#    a = np.full(np.shape(finfo['cell_name']), 'nan', dtype=object)
-#    for i, name in enumerate(finfo['cell_name']):
-#        fname = finfo['filenames'][finfo['file_ind'][i]] + '_' + name
-#        s.add(fname)
-#        l.append(fname)
-#        a[i] = fname
-#    
-#    tests = ['tn_map_120314_elec1U', 'tn_map_120914_elec21U', 'tn_map_123014_elec31b']
-#    t_set = [0]*len(tests)
-#    t_list = [0]*len(tests)
-#    t_array = [0]*len(tests)
-#    for t in range(len(tests)):
-#        start = time.time()
-#        tests[t] in s
-#        t_set[t] = time.time() - start
-#        start = time.time()
-#        tests[t] in l
-#        t_list[t] = time.time() - start
-#        start = time.time()
-#        tests[t] in a
-#        t_array[t] = time.time() - start
-#    print('set:', t_set)
-#    print('list:', t_list)
-#    print('array:', t_array)
-    
-#    io = LoadData()
-#    fsession0 = io.load_session('tn_map_123014')
-#    print(fsession0.filename)
-#    fsession = io.load_session('asdf')
-#    print(fsession.filename)
-#    fneuron0 = io.load_neuron('tn_map_123014', 'elec1U')
-#    print(fneuron0.filename, fneuron0.name)
-#    fneuron = io.load_neuron('aasdf', 'asdf')
-#    print(fneuron.filename, fneuron.name)
     
     
     

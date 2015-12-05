@@ -13,8 +13,13 @@ import scipy as sp
 import scipy.io
 import scipy.optimize
 import scipy.signal
+import seaborn as sns
 from sklearn.decomposition import PCA, FactorAnalysis
 from sklearn.cluster import KMeans
+
+import matplotlib
+sns.set_style(style=None, rc=matplotlib.rcParamsDefault)
+
 '''
 Git command line:
 
@@ -545,15 +550,18 @@ class Neuron(object):
         return np.nansum(np.r_[z0 - self.get_gauss(x, y, 0, betas0), 
                                z1 - self.get_gauss(x, y, 1, betas0)] ** 2)
 
-    def fit_gaussian(self, niter=100):
-        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : START')           
+    def fit_gaussian(self, niter=100, print_betas=True):
+        betas0 = copy.copy(self.betas)
         results = sp.optimize.basinhopping(self.error_func, self.betas, 
                                            disp=False, 
                                            take_step=self.take_step, 
                                            accept_test=self.eval_fit,
                                            niter=niter)
         self.betas = results.x
-        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : FINISH')
+        print('\tSTART\tFINISH')
+        for i in range(len(betas0)):
+            print('%s:\t%.2f\t%.2f' % (self.param_labels[i], 
+                                       betas0[i], self.betas[i]))
         return results
     
     def take_step(self, x0):        
@@ -661,7 +669,7 @@ class Neuron(object):
         ''' Firing rates relative to cue onset for each reward condition 
         (reward or no reward) and spatial location
         '''
-        if self.fr_smooth == None:
+        if np.all(self.fr_smooth == None):
                 self.smooth_firing_rates(binSize, binShift)     
         self.get_fr_by_loc()
         ylim = self.get_ylim()
@@ -672,8 +680,10 @@ class Neuron(object):
             for yi in range(len(self.y)):
                 #plot
                 plt.sca(ax[len(self.y) - yi - 1, xi])  
-                plt.plot(t, self.fr_space[0, :, xi, yi], color='r')
-                plt.plot(t, self.fr_space[1, :, xi, yi], color='b')            
+                plt.plot(t, self.fr_space[0, :, xi, yi], 
+                         color=self.rew_colors[0], lw=1)
+                plt.plot(t, self.fr_space[1, :, xi, yi], 
+                         color=self.rew_colors[1], lw=1)          
                 plt.plot((0,0), ylim, linestyle='--', color='0.5')
                 #format
                 plt.title('x=%1.1f, y=%1.1f' % (self.x[xi], self.y[yi]), size=6)
@@ -704,7 +714,7 @@ class Neuron(object):
         ''' Firing rates relative to cue onset for cue predicted reward and
         no reward (irrespective of spatial location)
         '''        
-        if self.fr_smooth == None:
+        if np.all(self.fr_smooth == None):
             self.smooth_firing_rates(binSize, binShift)            
         t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)      
         fr0 = np.nanmean(self.fr_smooth[np.array(self.df['rew']==0),:], 0)
@@ -714,6 +724,7 @@ class Neuron(object):
         plt.sca(ax[0])
         plt.plot(t, fr0, c=self.rew_colors[0])
         plt.plot(t, fr1, c=self.rew_colors[1])
+        plt.ylabel('Firing rate (sp/s)')
         
         plt.sca(ax[1])
         count = 1
@@ -727,6 +738,8 @@ class Neuron(object):
                 count += 1
         plt.xlim(self.tFrame)
         plt.ylim((0, count))
+        plt.xlabel('Time relative to cue onset (s)')
+        plt.ylabel('Trial #')
         plt.show()   
         
     def plot_hot_spot(self, min_pos, max_pos):
@@ -787,7 +800,7 @@ class Neuron(object):
             plt.xlabel('x (deg)')
             if k == 0:
                 plt.ylabel('y (deg)')                    
-            ax[k].invert_yaxis()
+            ax[k].invert_yaxis()            
     
             #scatter
             x_scatter = (np.ravel(self.x_grid) + self.xy_max) * self.plot_density
@@ -801,7 +814,7 @@ class Neuron(object):
             plt.colorbar(im, cax=cax)
             plt.tick_params(labelsize=8)          
     
-        fig.tight_layout()
+        fig.tight_layout()        
         fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
                   'mapping_py/mapping/figs/'
         plt.savefig(fig_dir + self.filename + '_' + self.name + 
@@ -1008,8 +1021,19 @@ class Classifier(object):
         if plot_it==True:
             plt.figure()
             plt.scatter(X1[:,0], X1[:,1])
+            plt.xlabel('PC1')
+            plt.ylabel('PC2')
+            plt.title('n = %d' %(X.shape[0]))
             plt.show()
         return X1
+        
+    def corr_chart(self, X):
+        f, ax = plt.subplots(figsize=(9, 9))
+        #cmap = sns.diverging_palette(220, 100, as_cmap=True)
+        sns.corrplot(X, annot=False, sig_stars=True, names=self.param_labels,
+                     diag_names=False, ax=ax)
+        f.tight_layout()
+        plt.show()
         
     def kmeans(self, X, X1, n_clusters=2):
         kmeans = KMeans(n_clusters=n_clusters)
@@ -1023,22 +1047,35 @@ class Classifier(object):
         plt.show()
         return kmeans.labels_
         
-    def kmeans_scatters(self, X, labels):
+    def kmeans_exploratory(self, X, labels):
         ''' exporatory analyses comparing proporties of the groups defined
         by a kmeans cluster
         
         X: betas from 2d gaussian fit
         labels: grouping by kmeans
-        '''
+        
+        self.param_labels = ['ux', 'uy', 'stdx', 'stdy',
+                             'minfr_nr', 'maxfr_nr', 'minfr_rw', 'maxfr_rw']
+        '''               
         
         colors = self.get_colors(labels)
         for i,j in combinations(range(X.shape[1]), 2):
-            plt.figure()            
-            plt.scatter(X[:,i], X[:,j], c=colors)
-            plt.xlabel(self.param_labels[i])
-            plt.ylabel(self.param_labels[j])
-            plt.show()
+            if i > 3 and j > 3:
+                plt.figure()            
+                plt.scatter(X[:,i], X[:,j], c=colors)
+                plt.xlabel(self.param_labels[i])
+                plt.ylabel(self.param_labels[j])
+                plt.show()                    
+
+            
+    def kmeans_targeted(self, X, labels):  
+        ''' specific analyses comparing proporties of the groups defined
+        by a kmeans cluster
         
+        X: betas from 2d gaussian fit
+        labels: grouping by kmeans
+        '''      
+        colors = self.get_colors(labels)
         d = self.get_betas_dict(X)
         d_labels = self.get_colors_dict(labels)
         plt.figure()
@@ -1065,7 +1102,6 @@ class Classifier(object):
         self.get_xy_plot_grid()
         for i in np.unique(labels):
             Xgroup = X[labels==i, :].mean(axis=0)  
-            print(i, Xgroup)
             g_nr = self.get_gauss(0, Xgroup)
             g_rw = self.get_gauss(1, Xgroup)
             self.plot_gaussian([g_nr, g_rw], ['No reward', 'Reward'], 
@@ -1130,12 +1166,21 @@ class Classifier(object):
                 self.x_plot_grid[xi, yi] = x_plot[xi]
                 self.y_plot_grid[xi, yi] = y_plot[yi]
                 
-def demo():
+def demo(one_example=True):
     
     io = LoadData()
-    demo_neurons = {}
+    if one_example == True:
+        demo_neurons = {'tn_map_123014': ['elec11U']}
+    else:
+        demo_neurons = {'tn_map_120914': ['elec10a', 'elec21a'],
+                        'tn_map_123014': ['elec11U', 'elec9U'], 
+                        'tn_map_122914': ['elec7U'],
+                        'tn_map_121614': ['elec17U', 'elec3b'], 
+                        'tn_map_121214': ['elec13U'], 
+                        'tn_map_121114': ['elec11U']}
     for file in demo_neurons:
         for cell in demo_neurons[file]:
+            
             # load neuron object
             print('Loading neuron', file, cell)
             neuron = io.load_neuron(file, cell)
@@ -1151,7 +1196,7 @@ def demo():
             
             # Firing rates for each location in experiment
             neuron.get_frmean_by_loc((.1,.5))      
-            neuron.psth_map()            
+            neuron.psth_map()  
             
             # Use firing rates to determine initial guess paramaters for 2d 
             # gaussian fit
@@ -1166,18 +1211,7 @@ def demo():
                                     neuron.betas)
             g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
                                     neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)        
-
-    # create clasifier object    
-    c = Classifier()
-    # get gaussian fit parameters for all neurons
-    X = c.get_good_betas()
-    # use PCA to reduce dimensionality (8 -> 2) for visualization
-    X1 = c.pca()
-    # classify neurons into 'n_clusters' groups
-    labels = c.kmeans(X, X1, n_clusters=3)
-    c.kmeans_scatters(X, labels)
-    c.heatmaps(X, labels)     
+            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space) 
     
     
 def get_file_info():
@@ -1190,11 +1224,10 @@ def get_file_info():
     finfo['file_ind'] -= 1      
     return finfo
     
-def create_all():
+def create_all(overwrite=True):
     ''' Create all Sessions & Neuron objects '''
     finfo = get_file_info()
-    directory = '/Users/cjpeck/Documents/Matlab/Blackrock/Data/MAP_PY'
-    overwrite = True
+    directory = '/Users/cjpeck/Documents/Matlab/Blackrock/Data/MAP_PY/'    
     exp = Experiment(overwrite)
     for iFile, file in enumerate(finfo['filenames']):
         # load file
@@ -1204,86 +1237,106 @@ def create_all():
         exp.add_session(f, file, cells)        
     exp.save_experiment() 
     
-def create_neurons_and_plot():
+def create_neurons_and_plot(start_ind=0):
     ''' create all Neuron objects and plot them '''
     finfo = get_file_info()
     directory = '/Users/cjpeck/Documents/Matlab/Blackrock/Data/MAP_PY/'
     for iFile, file in enumerate(finfo['filenames']):
-        f = sp.io.loadmat(directory + file + '.nex.mat', squeeze_me=True)
-        print('Loaded file', file)
-        cells = finfo['cell_name'][finfo['file_ind'] == iFile]             
-        for cell in cells:
-            print('creating neuron', file, cell)
-            neuron = Neuron(f, file, cell)
-            neuron.get_xy()
-            neuron.get_xy_grid()
-            neuron.get_xy_plot_grid()    
+        if iFile >= start_ind:
+            f = sp.io.loadmat(directory + file + '.nex.mat', squeeze_me=True)
+            print('Loaded file', file)
+            cells = finfo['cell_name'][finfo['file_ind'] == iFile]             
+            for cell in cells:
+                print('creating neuron', file, cell)
+                neuron = Neuron(f, file, cell)
+                neuron.get_xy()
+                neuron.get_xy_grid()
+                neuron.get_xy_plot_grid()    
+                
+                # Computer firing rates for each location in experiment
+                neuron.get_frmean_by_loc((.1,.5))
+                
+                neuron.smooth_firing_rates()
+                neuron.psth_map()
+                neuron.psth_rew()        
+                
+                # Use firing rates to determine initial guess paramaters for 2d 
+                # gaussian fit
+                neuron.get_initial_params()
+                
+                # Fit guassian function with 'basinhopping' algorithm in attempt
+                # find a global minimum in this paramater space
+                neuron.fit_gaussian(niter=100)
+                
+                # Get high-res guassian for plotting based on the fitted parameters
+                g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
+                                        neuron.betas)
+                g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
+                                        neuron.betas)        
+                neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
+                
+                neuron.save_neuron()
             
-            # Computer firing rates for each location in experiment
-            neuron.get_frmean_by_loc((.1,.5))
-            
-            neuron.smooth_firing_rates()
-            neuron.psth_map()
-            neuron.psth_rew()        
-            
-            # Use firing rates to determine initial guess paramaters for 2d 
-            # gaussian fit
-            neuron.get_initial_params()
-            
-            # Fit guassian function with 'basinhopping' algorithm in attempt
-            # find a global minimum in this paramater space
-            neuron.fit_gaussian(niter=10)
-            
-            # Get high-res guassian for plotting based on the fitted parameters
-            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
-                                    neuron.betas)
-            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
-                                    neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
-            
-            neuron.save_neuron()
-            
-def load_neurons_and_plot():
+def load_neurons_and_plot(start_ind=0):
     ''' load all Neuron objects and plot them '''
     io = LoadData()
     for i, file in enumerate(io.experiment.files):
-        for cell in io.experiment.files[file]:
-            
-            # load neuron object
-            print('Loading neuron', file, cell)
-            neuron = io.load_neuron(file, cell)
-            
-            # X/Y information for stimuli in mapping experiment
-            neuron.get_xy()
-            neuron.get_xy_grid()
-            neuron.get_xy_plot_grid()    
-            
-            # Computer firing rates for each location in experiment
-            neuron.get_frmean_by_loc((.1,.5))
-            
-            neuron.smooth_firing_rates()
-            neuron.psth_map()
-            neuron.psth_rew()
-            
-            #min_pos, max_pos = neuron.define_hot_spot()
-            #neuron.plot_hot_spot(min_pos, max_pos)                
-            
-            # Use firing rates to determine initial guess paramaters for 2d 
-            # gaussian fit
-            neuron.get_initial_params()
-            
-            # Fit guassian function with 'basinhopping' algorithm in attempt
-            # find a global minimum in this paramater space
-            neuron.fit_gaussian()
-            
-            # Get high-res guassian for plotting based on the fitted parameters
-            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
-                                    neuron.betas)
-            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
-                                    neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
+        if i >= start_ind:
+            for cell in io.experiment.files[file]:
+                
+                # load neuron object
+                print('Loading neuron', file, cell)
+                neuron = io.load_neuron(file, cell)
+                
+                # X/Y information for stimuli in mapping experiment
+                neuron.get_xy()
+                neuron.get_xy_grid()
+                neuron.get_xy_plot_grid()    
+                
+                # Computer firing rates for each location in experiment
+                neuron.get_frmean_by_loc((.1,.5))
+                
+                neuron.smooth_firing_rates()
+                neuron.psth_map()
+                neuron.psth_rew()
+                
+                #min_pos, max_pos = neuron.define_hot_spot()
+                #neuron.plot_hot_spot(min_pos, max_pos)                
+                
+                # Use firing rates to determine initial guess paramaters for 2d 
+                # gaussian fit
+                neuron.get_initial_params()
+                
+                # Fit guassian function with 'basinhopping' algorithm in attempt
+                # find a global minimum in this paramater space
+                neuron.fit_gaussian(niter=10)
+                
+                # Get high-res guassian for plotting based on the fitted parameters
+                g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
+                                        neuron.betas)
+                g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
+                                        neuron.betas)        
+                neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
 
 if __name__ == '__main__':
-    create_neurons_and_plot()
+    pass    
+    #load_neurons_and_plot(12)
+    #create_neurons_and_plot()  
+    create_all(overwrite=False)
+    #demo()
     
-        
+    '''
+    # create clasifier object    
+    c = Classifier()   
+    X = c.get_good_betas()
+    X1 = c.pca(plot_it=False)
+    
+    # pairwise correlations between coefficients
+    c.corr_chart(X)
+    
+    # classify neurons into 'n_clusters' groups
+    labels = c.kmeans(X, X1, n_clusters=3)
+    c.kmeans_exploratory(X, labels)
+    c.kmeans_targeted(X, labels)
+    c.heatmaps(X, labels)    
+    '''

@@ -4,8 +4,10 @@ from collections import OrderedDict
 import copy
 from itertools import combinations  
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
+import os
 import pandas as pd
 import pdb
 import pickle
@@ -45,6 +47,10 @@ class Experiment(object):
             self.load_experiment()
         else:
             self.files = OrderedDict()
+        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
+            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
+        else:
+            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
             
     def add_session(self, f, fname, cells):       
         '''Add a session to the dictionary and create the 'Session' object for 
@@ -63,16 +69,14 @@ class Experiment(object):
             
     def save_experiment(self):
         '''Save experiment file'''
-        directory = '/Users/cjpeck/Documents/mapping_py_data/'
         print('saving: mapping_exp')
-        with open(directory + 'mapping_exp.pickle', 'wb') as f:        
+        with open(self.directory + 'mapping_exp.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
             
     def load_experiment(self):
         '''Save experiment file'''
-        directory = '/Users/cjpeck/Documents/mapping_py_data/'
         print('loading: mapping_exp')
-        with open(directory + 'mapping_exp.pickle', 'rb') as f:
+        with open(self.directory + 'mapping_exp.pickle', 'rb') as f:
             dat = pickle.load(f)
             self.files = dat.files            
                                     
@@ -95,6 +99,10 @@ class Session(object):
         self.laser = []
         self.process_analog_data(f)
         self.extract_trial_info(f)
+        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
+            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
+        else:
+            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
         
     def add_neuron(self, f, fname, cellname):
         '''Append neuron names to list of neurons in that session. Create
@@ -209,9 +217,8 @@ class Session(object):
             
     def save_session(self):
         '''Save session object'''
-        directory = '/Users/cjpeck/Documents/mapping_py_data/'
         print('saving:', self.filename)
-        with open(directory + self.filename + '.pickle', 'wb') as f:        
+        with open(self.directory + self.filename + '.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
     
 class Neuron(object):
@@ -232,6 +239,11 @@ class Neuron(object):
     '''
     def __init__(self, f, fname, cellname):    
         
+        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
+            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
+        else:
+            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
+            
         # cell info
         self.filename = fname
         self.name = cellname        
@@ -729,15 +741,11 @@ class Neuron(object):
         plt.plot(t1, fr1)
         plt.show()
         
-    def psth_map(self, binSize=10, binShift=1):
+    def psth_map(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for each reward condition 
         (reward or no reward) and spatial location
         '''
-        if np.all(self.fr_smooth == None):
-                self.smooth_firing_rates(binSize, binShift)     
-        self.get_fr_by_loc()
-        ylim = self.get_ylim()
-        
+        ylim = self.get_ylim()        
         t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)
         fig, ax = plt.subplots(nrows=len(self.y), ncols=len(self.x))
         for xi in range(len(self.x)):
@@ -771,15 +779,16 @@ class Neuron(object):
                  ha='center', va='center', rotation='vertical')
         fig.tight_layout()
         
-        #plt.savefig(title + '_psth_map.eps', bbox_inches='tight')
-        plt.show()    
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()    
         
-    def psth_rew(self, binSize=10, binShift=1):
+    def psth_rew(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for cue predicted reward and
         no reward (irrespective of spatial location)
-        '''        
-        if np.all(self.fr_smooth == None):
-            self.smooth_firing_rates(binSize, binShift)            
+        '''             
         t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)      
         fr0 = np.nanmean(self.fr_smooth[np.array(self.df['rew']==0),:], 0)
         fr1 = np.nanmean(self.fr_smooth[np.array(self.df['rew']==1),:], 0)
@@ -804,9 +813,13 @@ class Neuron(object):
         plt.ylim((0, count))
         plt.xlabel('Time relative to cue onset (s)')
         plt.ylabel('Trial #')
-        plt.show()   
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()   
         
-    def plot_hot_spot(self, min_pos, max_pos):
+    def plot_hot_spot(self, min_pos, max_pos, pdf=None):
         ''' plot mean firing rates on the grid of locations and indicate the
         corresponding preferred and non-preferred regions as determined by
         'define_hot_spot
@@ -840,9 +853,13 @@ class Neuron(object):
             plt.xlabel('x (deg)')
             plt.ylabel('y (deg)') 
         fig.tight_layout()
-        plt.show() 
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show() 
         
-    def plot_gaussian(self, g, z):
+    def plot_gaussian(self, g, z, pdf=None):
         
         '''plot gaussian colormap with overlaid scatter of firing rates
            x, y are MxN array (typically denser than observed data points)
@@ -850,8 +867,7 @@ class Neuron(object):
            z is actual firing rates
         '''
         fig, ax = plt.subplots(nrows=1, ncols=np.size(g,0))
-        plt.suptitle(self.filename + '_' + self.name, size=8)
-        
+        plt.suptitle(self.filename + '_' + self.name, size=8)        
         for k in range(np.size(g,0)):
             
             #colormap
@@ -878,12 +894,12 @@ class Neuron(object):
             plt.colorbar(im, cax=cax)
             plt.tick_params(labelsize=8)          
     
-        fig.tight_layout()        
-        fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
-                  'mapping_py/mapping/figs/'
-        plt.savefig(fig_dir + self.filename + '_' + self.name + 
-                    '.pdf', bbox_inches='tight')
-        plt.show()
+        fig.tight_layout()    
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()
         
     ### ANALYSIS FUNCTIONS
     def define_hot_spot(self):
@@ -933,10 +949,9 @@ class Neuron(object):
         
     def save_neuron(self):    
         ''' Create a pickle of the neuron object '''
-        directory = '/Users/cjpeck/Documents/mapping_py_data/'
         fname = self.filename + '_' + self.name
-        print('saving:', directory + fname)
-        with open(directory + fname + '.pickle', 'wb') as f:        
+        print('saving:', self.directory + fname)
+        with open(self.directory + fname + '.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
 
 
@@ -947,7 +962,10 @@ class LoadData(object):
     FUNCTIONALITY: Just loads them
     '''        
     def __init__(self):
-        self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
+        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
+            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
+        else:
+            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
         with open(self.directory + 'mapping_exp.pickle', 'rb') as f:
             self.experiment = pickle.load(f)            
     
@@ -994,7 +1012,12 @@ class Behavior(object):
     population-level behavioral analyses
     '''
     def __init__(self, tFrame=[-500, 500]):
-        self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
+        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
+            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
+            self.save_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
+        else:
+            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
+            self.save_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
         io = LoadData()
         self.files = np.array(list(io.experiment.files.keys()))
         self.nfiles = len(self.files)        
@@ -1007,6 +1030,12 @@ class Behavior(object):
         self.lick_rew = np.empty((self.nfiles, self.nt, 2))
         self.lick_rew_dir = np.empty((self.nfiles, self.nt, 2, 2))
         self.lick_rew_set = np.empty((self.nfiles, self.nt, 2, 2))
+        self.hr_rew = np.empty((self.nfiles, 2))
+        self.hr_rew_dir = np.empty((self.nfiles, 2, 2))
+        self.hr_rew_set = np.empty((self.nfiles, 2, 2))
+        self.rt_rew = np.empty((self.nfiles, 2))
+        self.rt_rew_dir = np.empty((self.nfiles, 2, 2))
+        self.rt_rew_set = np.empty((self.nfiles, 2, 2))
         for iFile, file in enumerate(self.files):
             
             with open(self.directory + file + '.pickle', 'rb') as f:
@@ -1014,32 +1043,69 @@ class Behavior(object):
                 
             # add fake reward times for the non-rew trials
             rewOn = np.array(dat.df['t_REWARD_ON'])
-            isRew = np.array(dat.df['rew'])
+            isRew = np.array(dat.df['rew'].fillna(99), dtype=int)            
             succOn = np.array(dat.df['t_SUCCESS'])
             delay = np.nanmean(rewOn[isRew==1] - succOn[isRew==1])
             rewOn[(isRew == 0) & ~np.isnan(succOn)] = succOn[(isRew == 0) & ~np.isnan(succOn)] + delay
+
+            # other info
+            cue_set = np.array(dat.df['cue_set'].fillna(99), dtype=int)
+            cue_dir = np.array([1 if x < 0 else 0 if x > 0 else 99 
+                                for x in dat.df['CUE_X']], dtype=int)
+            dat.df['rt'] = dat.df['t_FIX_OUT'] - dat.df['t_TARG_ON']            
             
             # licking split by reward           
             for irew in range(2):
                 inds = np.logical_and(isRew == irew, ~np.isnan(rewOn))
-                self.lick_rew[iFile, :, irew] = self.align_licks(dat.laser, inds, rewOn)
-            
-            # licking split by reward and direction
-            cue_dir = np.array([1 if x < 0 else 0 if x > 0 else np.nan 
-                                for x in dat.df['CUE_X']])
+                self.lick_rew[iFile, :, irew] = self.align_licks(dat.laser, inds, rewOn)            
+            # licking split by reward and direction            
             for irew in range(2):
                 for idir in range(2):                    
                     inds = np.logical_and(np.logical_and(isRew == irew, cue_dir == idir), 
                                           ~np.isnan(rewOn))           
-                    self.lick_rew_dir[iFile, :, irew, idir] = self.align_licks(dat.laser, inds, rewOn)
-            
-            # licking split by reward and direction
+                    self.lick_rew_dir[iFile, :, irew, idir] = self.align_licks(dat.laser, inds, rewOn)            
+            # licking split by reward and cue set
             for irew in range(2):
                 for iset in range(2):                    
-                    inds = np.logical_and(np.logical_and(isRew == irew, np.array(dat.df['cue_set'] == iset)), 
+                    inds = np.logical_and(np.logical_and(isRew == irew, cue_set == iset), 
                                           ~np.isnan(rewOn))           
                     self.lick_rew_set[iFile, :, irew, iset] = self.align_licks(dat.laser, inds, rewOn)
                     
+            # hit rate by reward
+            for irew in range(2):
+                hits = dat.df.ix[(isRew == irew) & (dat.df['hit'] | dat.df['miss']), 'hit']
+                self.hr_rew[iFile, irew] = hits.sum() / len(hits)                
+            # hit rate by reward and direction
+            for irew in range(2):
+                for idir in range(2):
+                    hits = dat.df.ix[(isRew == irew) & (cue_dir == idir) & 
+                                     (dat.df['hit'] | dat.df['miss']), 'hit']
+                    self.hr_rew_dir[iFile, irew, idir] = hits.sum() / len(hits)            
+            # hit rate by reward and cue set
+            for irew in range(2):
+                for iset in range(2):
+                    hits = dat.df.ix[(isRew == irew) & (cue_set == iset) & 
+                                     (dat.df['hit'] | dat.df['miss']), 'hit']
+                    self.hr_rew_set[iFile, irew, iset] = hits.sum() / len(hits)
+                    
+            # reaction time by reward
+            for irew in range(2):
+                rt = dat.df.ix[(isRew == irew) & dat.df['hit'], 'rt']
+                self.rt_rew[iFile, irew] = rt.mean(skipna=True)
+            # reaction time by reward and direction
+            for irew in range(2):
+                for idir in range(2):
+                    rt = dat.df.ix[(isRew == irew) & (cue_dir == idir) & 
+                                    dat.df['hit'], 'rt']
+                    self.rt_rew_dir[iFile, irew, idir] = rt.mean(skipna=True)            
+            # reaction time by reward and cue set
+            for irew in range(2):
+                for iset in range(2):
+                    rt = dat.df.ix[(isRew == irew) & (cue_set == iset) & 
+                                    dat.df['hit'], 'rt']
+                    self.rt_rew_set[iFile, irew, iset] = rt.mean(skipna=True)
+                
+
     def align_licks(self, laser, inds, etimes):
         licks = [laser[i] for i in range(len(laser)) if inds[i]]
         zero_inds = np.array(np.round(etimes[inds]*1000), dtype=int)
@@ -1052,11 +1118,10 @@ class Behavior(object):
         return np.nanmean(out, axis=0)
         
     def save_behavior(self):
-        ''' Create a pickle of the neuron object '''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
+        ''' Create a pickle of the behavior object '''        
         fname = 'behavioral_data'
-        print('saving:', directory + fname)
-        with open(directory + fname + '.pickle', 'wb') as f:        
+        print('saving:', self.save_dir + fname)
+        with open(self.save_dir + fname + '.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
                             
 class Population(object):
@@ -1301,6 +1366,71 @@ class Classifier(object):
                 self.x_plot_grid[xi, yi] = x_plot[xi]
                 self.y_plot_grid[xi, yi] = y_plot[yi]
                 
+class PopParams(object):
+    
+    def __init__(self):
+        self.directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'        
+        fname = 'model_testng'
+        print('saving:', self.directory + fname)
+        with open(self.directory + fname + '.pickle', 'rb') as f:        
+            params = pickle.load(f)
+        
+        self.param_labels = ['ux', 'uy', 'stdx', 'stdy',
+                             'minfr_nr', 'maxfr_nr', 'minfr_rw', 'maxfr_rw']  
+        self.method = 'Nelder-Mead'
+        self.df = pd.DataFrame([x[1] for x in params[self.method]], 
+                               columns=self.param_labels)
+    
+    def xy_plot_info(self):      
+        ux = self.df['ux']
+        uy = self.df['uy']
+        comp = (self.df['minfr_rw'] - self.df['minfr_nr']) / \
+               (self.df['minfr_rw'] + self.df['minfr_nr'])
+        thresh = 0.6
+        
+        pos_mean = (ux[comp > thresh].mean(), uy[comp > thresh].mean())
+        pos_sem = (ux[comp > thresh].sem(), uy[comp > thresh].sem())
+        neg_mean = (ux[comp < -thresh].mean(), uy[comp < -thresh].mean())
+        neg_sem = (ux[comp < -thresh].sem(), uy[comp < -thresh].sem())
+
+        colors = [(0,0,1) if x > thresh 
+                  else (1,0,0) if x < -thresh 
+                  else (0.3, 0.3, 0.3) for x in comp]
+        size = [30 if abs(x) > thresh 
+                else 10 for x in comp]
+        return ux, uy, pos_mean, pos_sem, neg_mean, neg_sem, colors, size
+                   
+    def xy_scatter(self):                        
+        ux, uy, pos_mean, pos_sem, neg_mean, neg_sem, colors, size = \
+            self.xy_plot_info()
+                
+        plt.figure()        
+        plt.scatter(ux, uy, 
+                    c=colors, s=size, linewidths=0, alpha=0.5)        
+        plt.show()
+        
+        plt.figure()
+        plt.scatter(pos_mean[0], pos_mean[1], c='b', s=30)
+        plt.errorbar(pos_mean[0], pos_mean[1], pos_sem[1], pos_sem[0], c='b')
+        plt.scatter(neg_mean[0], neg_mean[1], c='r', s=30)
+        plt.errorbar(neg_mean[0], neg_mean[1], neg_sem[1], neg_sem[0], c='r')
+        plt.show()
+        
+    def xy_scatter_bokeh(self):        
+        from bokeh.plotting import output_server, figure, scatter, show
+        ux, uy, pos_mean, pos_sem, neg_mean, neg_sem, colors, size = \
+            self.xy_plot_info()
+        output_server("scatter.html")
+        figure(tools="pan,wheel_zoom,box_zoom,reset,previewsave,select")
+        
+        scatter(ux, uy, color="#FF00FF", nonselection_fill_color="#FFFF00", nonselection_fill_alpha=1)
+        scatter(ux, uy, color="red")
+        scatter(ux, uy, marker="square", color="green")
+        scatter(ux, uy, marker="square", color="blue", name="scatter_example")
+        
+        show()
+
+                    
 def demo(one_example=True):
     
     io = LoadData()
@@ -1385,43 +1515,53 @@ def overwrite_sessions():
 def load_neurons_and_plot(start_ind=0):
     ''' load all Neuron objects and plot them '''
     io = LoadData()
+    if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
+        fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
+                  'mapping_py/mapping/figs/'
+    else:
+        fig_dir = '/Volumes/cjpeck/Dropbox/Matlab/custom offline/' + \
+                  'mapping_py/mapping/figs/'
     for i, file in enumerate(io.experiment.files):
         if i >= start_ind:
-            for cell in io.experiment.files[file]:
-                
+            for cell in io.experiment.files[file]:                
+                                        
                 # load neuron object
                 print('Loading neuron', file, cell)
                 neuron = io.load_neuron(file, cell)
-                
-                # X/Y information for stimuli in mapping experiment
-                neuron.get_xy()
-                neuron.get_xy_grid()
-                neuron.get_xy_plot_grid()    
-                
-                # Computer firing rates for each location in experiment
-                neuron.get_frmean_by_loc((.1,.5))
-                
-                neuron.smooth_firing_rates()
-                neuron.psth_map()
-                neuron.psth_rew()
-                
-                #min_pos, max_pos = neuron.define_hot_spot()
-                #neuron.plot_hot_spot(min_pos, max_pos)                
-                
-                # Use firing rates to determine initial guess paramaters for 2d 
-                # gaussian fit
-                neuron.get_initial_params()
-                
-                # Fit guassian function with 'basinhopping' algorithm in attempt
-                # find a global minimum in this paramater space
-                neuron.fit_gaussian(niter=50)
-                
-                # Get high-res guassian for plotting based on the fitted parameters
-                g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
-                                        neuron.betas)
-                g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
-                                        neuron.betas)        
-                neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
+                with PdfPages(fig_dir + neuron.filename + '_' + neuron.name + 
+                              '.pdf') as pdf:
+                    
+                    # X/Y information for stimuli in mapping experiment
+                    neuron.get_xy()
+                    neuron.get_xy_grid()
+                    neuron.get_xy_plot_grid()    
+                    
+                    # Computer firing rates for each location in experiment
+                    neuron.smooth_firing_rates()
+                    neuron.get_frmean_by_loc((.1,.5))
+                    neuron.get_fr_by_loc()
+                                        
+                    neuron.psth_map(pdf)                
+                    neuron.psth_rew(pdf)                    
+                    
+                    #min_pos, max_pos = neuron.define_hot_spot()
+                    #neuron.plot_hot_spot(min_pos, max_pos)                
+                    
+                    # Use firing rates to determine initial guess paramaters for 2d 
+                    # gaussian fit
+                    neuron.get_initial_params()
+                    
+                    # Fit guassian function with 'basinhopping' algorithm in attempt
+                    # find a global minimum in this paramater space
+                    neuron.fit_gaussian(niter=1)
+                    
+                    # Get high-res guassian for plotting based on the fitted parameters
+                    g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
+                                            neuron.betas)
+                    g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
+                                            neuron.betas)        
+                    neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space, pdf)
+                    
 
 if __name__ == '__main__':     
     
@@ -1439,11 +1579,12 @@ if __name__ == '__main__':
     #p.fit_gaussians(niter=100)
     #p.save_params()
     
+    #b = Behavior()
+    #b.extract_data()
+    #b.save_behavior()      
     
-    b = Behavior()
-    b.extract_data()
-    b.save_behavior()      
-    
+    pop = PopParams()
+    pop.xy_scatter()
     
     '''
     # create clasifier object    
