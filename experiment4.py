@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+#from __future__ import print_function
 from collections import OrderedDict
 import copy
 from itertools import combinations  
@@ -47,10 +48,8 @@ class Experiment(object):
             self.load_experiment()
         else:
             self.files = OrderedDict()
-        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
-            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
-        else:
-            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
+
+        self.directory = '/Users/syi115/GitHub/MappingData/'
             
     def add_session(self, f, fname, cells):       
         '''Add a session to the dictionary and create the 'Session' object for 
@@ -99,10 +98,7 @@ class Session(object):
         self.laser = []
         self.process_analog_data(f)
         self.extract_trial_info(f)
-        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
-            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
-        else:
-            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
+        self.directory = '/Users/syi115/GitHub/MappingData/'
         
     def add_neuron(self, f, fname, cellname):
         '''Append neuron names to list of neurons in that session. Create
@@ -239,10 +235,7 @@ class Neuron(object):
     '''
     def __init__(self, f, fname, cellname):    
         
-        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
-            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
-        else:
-            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
+        self.directory = '/Users/syi115/GitHub/MappingData/'
             
         # cell info
         self.filename = fname
@@ -307,9 +300,9 @@ class Neuron(object):
         
         # which side of the screen is contralateral to the recording site?
         # left: -1, right: 1
-        tmp = f['dat'][()]['data']['CUE_X'][f['dat'][()]['data']['CUE_CONTRA'] 
-                == 1]
-        tmp = np.unique(np.sign(tmp, dtype=int))
+
+        tmp = f['dat'][()]['data']['CUE_X'][f['dat'][()]['data']['CUE_CONTRA'] == 1]
+        tmp = np.unique(np.array(np.sign(tmp), dtype=int))
         if len(tmp)==1:
             self.contra = tmp[0]
         else:
@@ -962,10 +955,7 @@ class LoadData(object):
     FUNCTIONALITY: Just loads them
     '''        
     def __init__(self):
-        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
-            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
-        else:
-            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
+        self.directory = '/Users/syi115/GitHub/MappingData/'
         with open(self.directory + 'mapping_exp.pickle', 'rb') as f:
             self.experiment = pickle.load(f)            
     
@@ -1012,12 +1002,8 @@ class Behavior(object):
     population-level behavioral analyses
     '''
     def __init__(self, tFrame=[-500, 500]):
-        if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
-            self.directory = '/Users/cjpeck/Documents/mapping_py_data/'
-            self.save_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
-        else:
-            self.directory = '/Volumes/cjpeck/Documents/mapping_py_data/'
-            self.save_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
+        self.directory = '/Users/syi115/GitHub/MappingData/'
+        self.save_dir = '/Users/syi115/GitHub/MappingData/'
         io = LoadData()
         self.files = np.array(list(io.experiment.files.keys()))
         self.nfiles = len(self.files)        
@@ -1169,7 +1155,7 @@ class Population(object):
                 
     def save_params(self):
         ''' Create a pickle of the neuron object '''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
+        directory = '/Users/syi115/GitHub/MappingData/'
         fname = 'populations_params'
         print('saving:', directory + fname)
         with open(directory + fname + '.pickle', 'wb') as f:        
@@ -1187,7 +1173,7 @@ class Classifier(object):
     def __init__(self):                
         
         # load population data        
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
+        directory = '/Users/syi115/GitHub/MappingData/'
         fname = 'populations_params'
         with open(directory + fname + '.pickle', 'rb') as f:        
             self.pop = pickle.load(f)
@@ -1369,7 +1355,7 @@ class Classifier(object):
 class PopParams(object):
     
     def __init__(self):
-        self.directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'        
+        self.directory = '/Users/syi115/GitHub/MappingData/'      
         fname = 'model_testng'
         print('saving:', self.directory + fname)
         with open(self.directory + fname + '.pickle', 'rb') as f:        
@@ -1482,8 +1468,8 @@ def demo(one_example=True):
 def get_file_info():
     # initialize Experiment, and load information    
     finfo = sp.io.loadmat(
-        '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping/files/' + 
-        'map_cell_list.mat', squeeze_me=True)        
+        '/Users/syi115/GitHub/MappingData/src/map_cell_list.mat', 
+        squeeze_me=True)        
     # changed to zero based inds
     finfo['cell_ind'] -= 1
     finfo['file_ind'] -= 1      
@@ -1492,7 +1478,7 @@ def get_file_info():
 def create_all(overwrite=True):
     ''' Create all Sessions & Neuron objects '''
     finfo = get_file_info()
-    directory = '/Users/cjpeck/Documents/Matlab/Blackrock/Data/MAP_PY/'    
+    directory = '/Users/syi115/GitHub/MappingData/src/'
     exp = Experiment(overwrite)
     for iFile, file in enumerate(finfo['filenames']):
         if not file in exp.files or overwrite:
@@ -1505,22 +1491,17 @@ def create_all(overwrite=True):
 def overwrite_sessions():
     ''' Create all Sessions & Neuron objects '''
     finfo = get_file_info()
-    directory = '/Users/cjpeck/Documents/Matlab/Blackrock/Data/MAP_PY/'    
-    for iFile, file in enumerate(finfo['filenames']):
-        f = sp.io.loadmat(directory + file + '.nex.mat', squeeze_me=True)
-        print('Loaded file', file)
-        session = Session(f, file, [])
+    directory = '/Users/syi115/GitHub/MappingData/src/'    
+    for iFile, fname in enumerate(finfo['filenames']):
+        f = sp.io.loadmat(directory + fname + '.nex.mat', squeeze_me=True)
+        print('Loaded file', fname)
+        session = Session(f, fname, [])
         session.save_session()
     
 def load_neurons_and_plot(start_ind=0):
     ''' load all Neuron objects and plot them '''
     io = LoadData()
-    if os.path.isdir('/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/Mapping'):
-        fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
-                  'mapping_py/mapping/figs/'
-    else:
-        fig_dir = '/Volumes/cjpeck/Dropbox/Matlab/custom offline/' + \
-                  'mapping_py/mapping/figs/'
+    fig_dir = '/Users/syi115/GitHub/Mapping/figs/'
     for i, file in enumerate(io.experiment.files):
         if i >= start_ind:
             for cell in io.experiment.files[file]:                
@@ -1565,7 +1546,8 @@ def load_neurons_and_plot(start_ind=0):
 
 if __name__ == '__main__':     
     
-    pass    
+    create_all(overwrite=True)
+
     #b = Behavior()
     #b.extract_data()
     #b.save_behavior()    
@@ -1583,8 +1565,8 @@ if __name__ == '__main__':
     #b.extract_data()
     #b.save_behavior()      
     
-    pop = PopParams()
-    pop.xy_scatter()
+    #pop = PopParams()
+    #pop.xy_scatter()
     
     '''
     # create clasifier object    

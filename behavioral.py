@@ -1,29 +1,30 @@
 # -*- coding: utf-8 -*-
 
-import matplotlib.pyplot as plt
+#from __future__ import print_function
 import numpy as np
 import pandas as pd
 import pickle
+#import plotly
 import scipy as sp
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
 
 from experiment4 import Behavior
 
-
+import matplotlib.pyplot as plt
 import matplotlib
-import matplotlib.font_manager as font_manager
-fontpath = '/Users/cjpeck/anaconda/lib/python3.4/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
-prop = font_manager.FontProperties(fname=fontpath)
-matplotlib.rcParams['font.family'] = prop.get_name()
-matplotlib.rcParams['pdf.fonttype'] = 42
+#import matplotlib.font_manager as font_manager
+#fontpath = '/Users/cjpeck/anaconda/lib/python3.4/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
+#prop = font_manager.FontProperties(fname=fontpath)
+#matplotlib.rcParams['font.family'] = prop.get_name()
+#matplotlib.rcParams['pdf.fonttype'] = 42
 
 
 class BehavioralAnalyses(object):
     
     def __init__(self):
-        self.dir_data = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
-        self.dir_figs = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/figs/'
+        self.dir_data = '../MappingData/'
+        self.dir_figs = 'figs/'
         self.monkeys = ['Tom', 'Spaghetti']
         self.directions = ['Ipsi.', 'Contra.']
         self.cuesets = ['Cue set 0', 'Cue set 1']
@@ -33,7 +34,7 @@ class BehavioralAnalyses(object):
             self.dat = pickle.load(f)
     
     ### plotting
-    def plot_licking(self):                
+    def plot_licking(self):
         plt.figure()
         t_plot = np.array(range(self.dat.tFrame[0], self.dat.tFrame[1]+1)) / 1000
         neu = self.dat.lick_rew[:,:,0]
@@ -97,7 +98,7 @@ class BehavioralAnalyses(object):
         title = 'Reaction time: p=%1.4f' %(p)
         self.plot_performance(neu_mean, rew_mean, title=title, labels=['Neutral', 'Reward'], c=['r', 'b'])
     
-    def plot_performance(self, *args, title, labels, c):
+    def plot_performance(self, title, labels, c,  *args):
         plt.figure()
         n = len(args)
         x = np.arange(n) + 0.5
@@ -229,7 +230,7 @@ class BehavioralAnalyses(object):
                         np.ones_like(y0b), np.ones_like(y1b))) 
         return y, x1, x2
         
-    def df_for_statsmodel(self, *args, labels):        
+    def df_for_statsmodel(self, labels, *args):
         out = args[0]
         for arg in args[1:]:
             out = np.vstack((out, arg))
@@ -242,12 +243,9 @@ def print_and_write(f, line):
         f.writelines(line.__str__())
     else:
         f.writelines(line)
-            
-    
-if __name__ == '__main__':
-    ba = BehavioralAnalyses()
-    
-    with open(ba.dir_figs + 'behavioral_results.txt', 'w') as f:        
+
+def figs_and_text():
+    with open(ba.dir_figs + 'figs/behavioral_results.txt', 'w') as f:        
         ba.plot_licking()        
         print_and_write(f, '\n**** LICKING: ACROSS MONKEY\n')
         print_and_write(f, ba.licking_across_monkey())        
@@ -277,5 +275,10 @@ if __name__ == '__main__':
         print_and_write(f, ba.rt_per_dir())
         print_and_write(f, '\n*** REACTION TIME: PER SET\n')
         print_and_write(f, ba.rt_per_set())
+
+if __name__ == '__main__':
+    ba = BehavioralAnalyses()
+    ba.plot_licking()
+
         
                             
