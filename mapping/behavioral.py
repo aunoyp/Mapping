@@ -1,24 +1,136 @@
 # -*- coding: utf-8 -*-
 
-#from __future__ import print_function
+import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
+import os
 import pandas as pd
 import pickle
-#import plotly
 import scipy as sp
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
 
-from experiment4 import Behavior
-
-import matplotlib.pyplot as plt
-import matplotlib
 #import matplotlib.font_manager as font_manager
 #fontpath = '/Users/cjpeck/anaconda/lib/python3.4/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
 #prop = font_manager.FontProperties(fname=fontpath)
 #matplotlib.rcParams['font.family'] = prop.get_name()
 #matplotlib.rcParams['pdf.fonttype'] = 42
 
+
+class Behavior(object):
+    ''' Behavior object:
+    PURPOSE: get behavioral data from all sessions in order to perform
+    population-level behavioral analyses
+    '''
+    def __init__(self, tFrame=[-500, 500]):
+        self.directory = '/Users/syi115/GitHub/MappingData/'
+        self.save_dir = '/Users/syi115/GitHub/MappingData/'
+        io = LoadData()
+        self.files = np.array(list(io.experiment.files.keys()))
+        self.nfiles = len(self.files)        
+        self.monkey = np.array([0 if file[0]=='t' else 1 
+                                for file in self.files])
+        self.tFrame = tFrame
+        self.nt = self.tFrame[1] - self.tFrame[0] + 1
+                            
+    def extract_data(self):
+        self.lick_rew = np.empty((self.nfiles, self.nt, 2))
+        self.lick_rew_dir = np.empty((self.nfiles, self.nt, 2, 2))
+        self.lick_rew_set = np.empty((self.nfiles, self.nt, 2, 2))
+        self.hr_rew = np.empty((self.nfiles, 2))
+        self.hr_rew_dir = np.empty((self.nfiles, 2, 2))
+        self.hr_rew_set = np.empty((self.nfiles, 2, 2))
+        self.rt_rew = np.empty((self.nfiles, 2))
+        self.rt_rew_dir = np.empty((self.nfiles, 2, 2))
+        self.rt_rew_set = np.empty((self.nfiles, 2, 2))
+        for iFile, file in enumerate(self.files):
+            
+            with open(self.directory + file + '.pickle', 'rb') as f:
+                dat = pickle.load(f)    
+                
+            # add fake reward times for the non-rew trials
+            rewOn = np.array(dat.df['t_REWARD_ON'])
+            isRew = np.array(dat.df['rew'].fillna(99), dtype=int)            
+            succOn = np.array(dat.df['t_SUCCESS'])
+            delay = np.nanmean(rewOn[isRew==1] - succOn[isRew==1])
+            rewOn[(isRew == 0) & ~np.isnan(succOn)] = succOn[(isRew == 0) & ~np.isnan(succOn)] + delay
+
+            # other info
+            cue_set = np.array(dat.df['cue_set'].fillna(99), dtype=int)
+            cue_dir = np.array([1 if x < 0 else 0 if x > 0 else 99 
+                                for x in dat.df['CUE_X']], dtype=int)
+            dat.df['rt'] = dat.df['t_FIX_OUT'] - dat.df['t_TARG_ON']            
+            
+            # licking split by reward           
+            for irew in range(2):
+                inds = np.logical_and(isRew == irew, ~np.isnan(rewOn))
+                self.lick_rew[iFile, :, irew] = self.align_licks(dat.laser, inds, rewOn)            
+            # licking split by reward and direction            
+            for irew in range(2):
+                for idir in range(2):                    
+                    inds = np.logical_and(np.logical_and(isRew == irew, cue_dir == idir), 
+                                          ~np.isnan(rewOn))           
+                    self.lick_rew_dir[iFile, :, irew, idir] = self.align_licks(dat.laser, inds, rewOn)            
+            # licking split by reward and cue set
+            for irew in range(2):
+                for iset in range(2):                    
+                    inds = np.logical_and(np.logical_and(isRew == irew, cue_set == iset), 
+                                          ~np.isnan(rewOn))           
+                    self.lick_rew_set[iFile, :, irew, iset] = self.align_licks(dat.laser, inds, rewOn)
+                    
+            # hit rate by reward
+            for irew in range(2):
+                hits = dat.df.ix[(isRew == irew) & (dat.df['hit'] | dat.df['miss']), 'hit']
+                self.hr_rew[iFile, irew] = hits.sum() / len(hits)                
+            # hit rate by reward and direction
+            for irew in range(2):
+                for idir in range(2):
+                    hits = dat.df.ix[(isRew == irew) & (cue_dir == idir) & 
+                                     (dat.df['hit'] | dat.df['miss']), 'hit']
+                    self.hr_rew_dir[iFile, irew, idir] = hits.sum() / len(hits)            
+            # hit rate by reward and cue set
+            for irew in range(2):
+                for iset in range(2):
+                    hits = dat.df.ix[(isRew == irew) & (cue_set == iset) & 
+                                     (dat.df['hit'] | dat.df['miss']), 'hit']
+                    self.hr_rew_set[iFile, irew, iset] = hits.sum() / len(hits)
+                    
+            # reaction time by reward
+            for irew in range(2):
+                rt = dat.df.ix[(isRew == irew) & dat.df['hit'], 'rt']
+                self.rt_rew[iFile, irew] = rt.mean(skipna=True)
+            # reaction time by reward and direction
+            for irew in range(2):
+                for idir in range(2):
+                    rt = dat.df.ix[(isRew == irew) & (cue_dir == idir) & 
+                                    dat.df['hit'], 'rt']
+                    self.rt_rew_dir[iFile, irew, idir] = rt.mean(skipna=True)            
+            # reaction time by reward and cue set
+            for irew in range(2):
+                for iset in range(2):
+                    rt = dat.df.ix[(isRew == irew) & (cue_set == iset) & 
+                                    dat.df['hit'], 'rt']
+                    self.rt_rew_set[iFile, irew, iset] = rt.mean(skipna=True)
+                
+
+    def align_licks(self, laser, inds, etimes):
+        licks = [laser[i] for i in range(len(laser)) if inds[i]]
+        zero_inds = np.array(np.round(etimes[inds]*1000), dtype=int)
+        out = np.empty((len(licks), self.nt))
+        for i, lick in enumerate(licks):
+            try:
+                out[i,:] = lick[zero_inds[i] + self.tFrame[0] : zero_inds[i] + self.tFrame[1]+1]
+            except:
+                ipdb.set_trace()
+        return np.nanmean(out, axis=0)
+        
+    def save_behavior(self):
+        ''' Create a pickle of the behavior object '''        
+        fname = 'behavioral_data'
+        print('saving:', self.save_dir + fname)
+        with open(self.save_dir + fname + '.pickle', 'wb') as f:        
+            pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
+                            
 
 class BehavioralAnalyses(object):
     
@@ -277,6 +389,11 @@ def figs_and_text():
         print_and_write(f, ba.rt_per_set())
 
 if __name__ == '__main__':
+
+    #b = Behavior()
+    #b.extract_data()
+    #b.save_behavior()    
+
     ba = BehavioralAnalyses()
     ba.plot_licking()
 
