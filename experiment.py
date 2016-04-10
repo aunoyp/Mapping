@@ -1,50 +1,26 @@
 # -*- coding: utf-8 -*-
 
+#from __future__ import print_function
 from collections import OrderedDict
+import copy
+from itertools import combinations  
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
+import os
 import pandas as pd
-import pdb
+import ipdb
 import pickle
 import scipy as sp
+import scipy.io
 import scipy.optimize
 import scipy.signal
-import scipy.io
-
-#import matplotlib
-#matplotlib.use('agg')
-#matplotlib.font_manager.fontManager.defaultFont['ttf'] = \
-#'/Users/cjpeck/anaconda/lib/python3.4/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
-#plt.figure
-#plt.scatter([1,2,3], [1,2,3])
-#h = plt.gca()
-#fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
-#              'mapping_py/mapping/figs/'
-#plt.savefig(fig_dir + 'test.pdf')
-
-#plt.rcdefaults()
-
-#plt.rc('font', **{'family':'fantasy'})
-
-#plt.rc('font', family='sans-serif') 
-#plt.rc('font', serif='Helvetica') 
-#plt.rc('text', usetex='false') 
-
-#plt.rcParams['font.sans-serif'] = ['Helvetica']
-#plt.rcParams['font.sans-serif'].remove('Helvetica')
-#plt.rcParams['font.sans-serif'].insert(0, 'Helvetica')
-#plt.rcParams['font.sans-serif'].remove('Bitstream Vera Sans')
-
-
+from sklearn.decomposition import PCA, FactorAnalysis
+from sklearn.cluster import KMeans
 
 '''
 Git command line:
-
-git add 'experiment.py'
-git commit -m 'updated experiment.py'
-git remote add origin https://github.com/cjpeck/Mapping.git
-git push -u origin master
 
 General structure:
    Experiment:
@@ -61,9 +37,14 @@ class Experiment(object):
     '''Experiment object: Maintains dictionary of experiment sessions and 
     corresponding neurons.'''    
     def __init__(self, OVERWRITE=False):
-        ''' Initialize dictionary'''
-        self.files = OrderedDict()
+        ''' Initialize dictionary'''        
         self.OVERWRITE = OVERWRITE
+        if not self.OVERWRITE:
+            self.load_experiment()
+        else:
+            self.files = OrderedDict()
+
+        self.directory = '/Users/syi115/GitHub/MappingData/'
             
     def add_session(self, f, fname, cells):       
         '''Add a session to the dictionary and create the 'Session' object for 
@@ -82,10 +63,16 @@ class Experiment(object):
             
     def save_experiment(self):
         '''Save experiment file'''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
         print('saving: mapping_exp')
-        with open(directory + 'mapping_exp.pickle', 'wb') as f:        
+        with open(self.directory + 'mapping_exp.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
+            
+    def load_experiment(self):
+        '''Save experiment file'''
+        print('loading: mapping_exp')
+        with open(self.directory + 'mapping_exp.pickle', 'rb') as f:
+            dat = pickle.load(f)
+            self.files = dat.files            
                                     
 class Session(object):
     '''Session object: Maintains list of cells in that session and contains
@@ -104,8 +91,9 @@ class Session(object):
                 self.add_neuron(f, fname, cell)
         self.eyes = []
         self.laser = []
-        self.pupil = []
         self.process_analog_data(f)
+        self.extract_trial_info(f)
+        self.directory = '/Users/syi115/GitHub/MappingData/'
         
     def add_neuron(self, f, fname, cellname):
         '''Append neuron names to list of neurons in that session. Create
@@ -125,46 +113,103 @@ class Session(object):
             
     def process_analog_data(self, f):
         '''Clean behavoral analog data inclding eye position, laser, and
-        pupil diameter
-        '''                
+        pupil diameter               
+        '''                        
         for i in range(self.ntrials):
             # checks to make sure the sampling frequency is 1000hz 
             dt = (f['dat'][()]['data']['eyes_dt'][i], 
-                  f['dat'][()]['data']['laser_dt'][i],
-                  f['dat'][()]['data']['pupil_dt'][i])                     
+                  f['dat'][()]['data']['laser_dt'][i])                     
             if sum([abs(x - 0.001) > 10e-6 for x in dt]):                
                 print('analog dt is not 1000hz')
-                pdb.set_trace()        
+                ipdb.set_trace()        
             # check that the start time of analog data collection is about 0,
             # pad with NaNs if start is slightly after zero
             t0 = (f['dat'][()]['data']['eyes_start_t'][i], 
-                  f['dat'][()]['data']['laser_start_t'][i],
-                  f['dat'][()]['data']['pupil_start_t'][i])                   
+                  f['dat'][()]['data']['laser_start_t'][i])                   
             nans_to_add = {round(x / 1e-3) for x in t0}            
             if len(nans_to_add) == 1:
                 nans_to_add = nans_to_add.pop()
             else:
                 print('different t0 for each analog data type')
-                pdb.set_trace()
+                ipdb.set_trace()
             if nans_to_add > 5:
                 print('analog start time is > 5 ms')
-                pdb.set_trace()
-    
+                ipdb.set_trace()
+            # these are lists (for every trial) 
+            # of numpy arrays (for every data point)    
             self.eyes.append(np.vstack((np.full((nans_to_add,2), np.nan), 
                                         np.array(f['dat'][()]['data']['eyes'][i], 
                                         dtype=float))))
             self.laser.append(np.hstack((np.full((nans_to_add,), np.nan), 
                                         np.array(f['dat'][()]['data']['laser'][i], 
-                                        dtype=float)))) 
-            self.pupil.append(np.hstack((np.full((nans_to_add,), np.nan), 
-                                        np.array(f['dat'][()]['data']['pupil'][i], 
-                                        dtype=float))))                                        
+                                        dtype=float))))
+                                 
+    def get_data_labels(self):
+        '''Data fields that we want to keep from the loaded .mat file.
+        Specify desired data type for each field as the default is 'object'
+        '''
+        return [('t_FP_ON', 'float'), ('t_FIX_ACH', 'float'), 
+                ('t_CUE_ON', 'float'), ('t_CUE_OFF', 'float'), 
+                ('t_TARG_ON', 'float'), ('t_TARG_OFF', 'float'), 
+                ('t_FIX_OUT', 'float'), ('t_TARG_ACH', 'float'),
+                ('t_SUCCESS', 'float'), ('t_REWARD_ON', 'float'), 
+                ('t_REWARD_OFF', 'float'), ('t_OUTCOME_OFF', 'float'), 
+                ('t_TRIAL_END', 'float'), ('t_NO_FIX', 'float'), 
+                ('t_BREAK_FIX', 'float'), ('t_BREAK_CUE', 'float'), 
+                ('t_BREAK_TARG', 'float'), ('t_NO_SACCADE', 'float'), 
+                ('t_MISS_TARG', 'float'), ('t_NO_HOLD_TARG', 'float'), 
+                ('t_FAIL', 'float'),
+                ('CUE_X', 'float'), ('CUE_Y', 'float'),  
+                ('CUE_TYPE', 'float'), 
+                ('REPEAT', 'bool')]
+    
+    def extract_trial_info(self, f):
+        '''Process trial information from the .mat structure. First
+        pass this information into a python dict and then transform into a
+        pandas dataframe.     
+        
+        # DICT with all trial information
+        # all information is the same (one per trial) EXCEPT for 'spkdata' 
+        # which can be any number of elements per trial
+        # (these are all CAST as OBJECTS - need to specify int or float)
+        
+        '''        
+
+        data = {}
+        labels = self.get_data_labels()
+        for label in labels:           
+            if label[0] == 't_REWARD_ON':
+                # 't_REWARD_ON' may include mutliple values - include the 1st
+                data[label[0]] = np.empty((self.ntrials,), dtype=label[1])
+                for i in range(self.ntrials):
+                    times = f['dat'][()]['data'][label[0]][i]
+                    if type(times) == float:
+                        data[label[0]][i] = times
+                    else:
+                        data[label[0]][i] = times[0]
+            else:                
+                data[label[0]] = np.array(
+                    f['dat'][()]['data'][label[0]], dtype=label[1])
+                     
+        # add additional fields        
+        data['rew'] = data['CUE_TYPE'] % 2
+        data['cue_set'] = data['CUE_TYPE']
+        data['cue_set'][np.logical_or(data['cue_set'] == 1, data['cue_set'] == 2)] = 0
+        data['cue_set'][np.logical_or(data['cue_set'] == 3, data['cue_set'] == 4)] = 1
+        data['hit'] = np.logical_not(np.isnan(data['t_SUCCESS']))
+        x0 = np.logical_not(np.isnan(data['t_NO_SACCADE']))
+        x1 = np.logical_not(np.isnan(data['t_MISS_TARG']))
+        x2 = np.logical_not(np.isnan(data['t_NO_HOLD_TARG']))
+        data['miss'] = np.logical_or(x0, x1)
+        data['miss'] = np.logical_or(data['miss'], x2)
+        
+        # tranfsorm DICT into a DATAFRAME
+        self.df = pd.DataFrame(data)
             
     def save_session(self):
         '''Save session object'''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
         print('saving:', self.filename)
-        with open(directory + self.filename + '.pickle', 'wb') as f:        
+        with open(self.directory + self.filename + '.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
     
 class Neuron(object):
@@ -180,9 +225,13 @@ class Neuron(object):
     -self.tInt: size of firing rate time bins
     -self.tShift: time shift between successive time bins
     
+    -ver3: same std for reward and no reward now
+    
     '''
     def __init__(self, f, fname, cellname):    
         
+        self.directory = '/Users/syi115/GitHub/MappingData/'
+            
         # cell info
         self.filename = fname
         self.name = cellname        
@@ -221,9 +270,14 @@ class Neuron(object):
         self.frmean_space = None
         
         # fit parameters for 2d gaussian
-        self.fit_type = 'basinhop'
+        self.param_labels = ['ux', 'uy', 'stdx', 'stdy',
+                             'minfr_nr', 'maxfr_nr', 'minfr_rw', 'maxfr_rw']        
+        self.lb = [-40, -40, 0, 0,
+                   0, 0, 0, 0]
+        self.ub = [40, 40, 100, 100,
+                   200, 200, 200, 200]
         self.betas = None
-        
+
         # plotting params for 2d gaussians
         self.xy_max = 20
         self.plot_density = 10 #points per degree
@@ -241,18 +295,14 @@ class Neuron(object):
         
         # which side of the screen is contralateral to the recording site?
         # left: -1, right: 1
-        tmp = f['dat'][()]['data']['CUE_X'][f['dat'][()]['data']['CUE_CONTRA'] 
-                == 1]
-        tmp = np.unique(np.sign(tmp, dtype=int))
+
+        tmp = f['dat'][()]['data']['CUE_X'][f['dat'][()]['data']['CUE_CONTRA'] == 1]
+        tmp = np.unique(np.array(np.sign(tmp), dtype=int))
         if len(tmp)==1:
             self.contra = tmp[0]
         else:
             print('cant determine which side is conta')
 
-        #parameters for gaussian fit
-        self.param_labels = ['ux', 'uy', 'stdx_nr', 'stdy_nr', 'stdx_rw', 
-                             'stdy_rw', 'minfr_nr', 'maxfr_nr', 'minfr_rw', 
-                             'maxfr_rw']
         # get the the data            
         self.process(f, fname, cellname)
         
@@ -508,6 +558,7 @@ class Neuron(object):
         ''' Computes the mean firing rate for each spatial location '''
         t = self.get_mean_t(tMean)
         self.frmean_space = np.empty((2, len(self.x), len(self.y)))
+        ipdb.set_trace()
         for ix in range(len(self.x)):
             for iy in range(len(self.y)):
                 for irew in range(2):
@@ -521,11 +572,11 @@ class Neuron(object):
             exp( - ((x-ux(0))/stdx(2))**2 - ((y-uy(1))/stdy(3))**2)
         '''
         if is_rew:
-            k = 4
-        else:
             k = 2
-        x_part = ((x - betas0[0]) / betas0[k]) ** 2
-        y_part = ((y - betas0[1]) / betas0[k+1]) ** 2
+        else:
+            k = 0
+        x_part = ((x - betas0[0]) / betas0[2]) ** 2
+        y_part = ((y - betas0[1]) / betas0[3]) ** 2
         g = betas0[k+4] + betas0[k+5] * np.exp(-x_part/2 - y_part/2)              
         return g        
                 
@@ -544,76 +595,73 @@ class Neuron(object):
         
         self.betas[0] = x[ind]
         self.betas[1] = y[ind]
-        self.betas[2] = 4
-        self.betas[3] = 4
-        self.betas[4] = 4
-        self.betas[5] = 4
-        self.betas[6] = np.nanmin(z0)
-        self.betas[7] = np.nanmax(z0) - np.nanmin(z0)
-        self.betas[8] = np.nanmin(z1)
-        self.betas[9] = np.nanmax(z1) - np.nanmin(z1)
-#        self.betas[0] = x[ind]
-#        self.betas[1] = y[ind]
-#        self.betas[2] = 4
-#        self.betas[3] = 4
-#        self.betas[4] = 4
-#        self.betas[5] = 4
-#        self.betas[6] = 0
-#        self.betas[7] = np.nanmean(z0)
-#        self.betas[8] = 0
-#        self.betas[9] = np.nanmean(z1)
+        self.betas[2] = 20
+        self.betas[3] = 20
+        self.betas[4] = np.nanmin(z0)
+        self.betas[5] = np.nanmax(z0) - np.nanmin(z0)
+        self.betas[6] = np.nanmin(z1)
+        self.betas[7] = np.nanmax(z1) - np.nanmin(z1)
         
     def error_func(self, betas0):
-        ''' error function of fitted 2d gaussian. 
+        ''' Error function of fitted 2d gaussian: returns sums of squares for
+        the current set of parameters. If parameters are out of bounds, 
+        returns 'np.inf'. 
         '''
+        if np.any(betas0 < self.lb) or np.any(betas0 > self.ub):
+            return np.inf
         x = np.ravel(self.x_grid)
         y = np.ravel(self.y_grid)
         z0 = np.ravel(self.frmean_space[0])
-        z1 = np.ravel(self.frmean_space[1])
-        
-        x_oob = betas0[0] < -40 or betas0[0] > 40
-        y_oob = betas0[1] < -40 or betas0[1] > 40
-        stdx_oob = betas0[2] < 0 or betas0[4] < 0
-        stdy_oob = betas0[3] < 0 or betas0[5] < 0
-        min_oob = betas0[6] < 0 or betas0[8] < 0
-        max_oob = betas0[7] > 400 or betas0[9] > 400
-        oob = x_oob or y_oob or stdx_oob or stdy_oob or min_oob or max_oob
-        if oob:
-            if self.fit_type == 'lsq':
-                return np.r_[np.full_like(z0, np.inf), np.full_like(z1, np.inf)]  
-            elif self.fit_type == 'basinhop':
-                return np.inf                
-        if self.fit_type == 'lsq':
-            return np.r_[z0 - self.get_gauss(x, y, 0, betas0), 
-                         z1 - self.get_gauss(x, y, 1, betas0)]
-        elif self.fit_type == 'basinhop':
-            return np.nansum(np.r_[z0 - neuron.get_gauss(x, y, 0, betas0), 
-                               z1 - neuron.get_gauss(x, y, 1, betas0)] ** 2)
+        z1 = np.ravel(self.frmean_space[1])        
+        return np.nansum(np.r_[z0 - self.get_gauss(x, y, 0, betas0), 
+                               z1 - self.get_gauss(x, y, 1, betas0)] ** 2)
 
-    def fit_gaussian(self):
-        print(self.fit_type)
-        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : START')
-        if self.fit_type == 'lsq':
-            self.betas, _ = sp.optimize.leastsq(self.error_func, self.betas)   
-        elif self.fit_type == 'basinhop':            
-            results = sp.optimize.basinhopping(self.error_func, self.betas, 
-                                               disp=True, 
-                                               callback=self.print_fun, 
-                                               take_step=self.take_step)  
-            self.betas = results.x
-        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : FINISH')
+    def fit_gaussian(self, niter=100, print_betas=True):
+        betas0 = copy.copy(self.betas)
+        results = sp.optimize.basinhopping(self.error_func, self.betas, 
+                                           disp=False, 
+                                           accept_test=self.eval_fit,
+                                           niter=niter)
+        self.betas = results.x
+        print('\tSTART\tFINISH')
+        for i in range(len(betas0)):
+            print('%s:\t%.2f\t%.2f' % (self.param_labels[i], 
+                                       betas0[i], self.betas[i]))
+        return results
     
-    def take_step(self, step):
-        step[0:2] += np.random.uniform(-10, 10, step[0:2].shape)
-        step[2:6] += np.random.uniform(-10, 10, step[2:6].shape)
-        step[6:] += np.random.uniform(-20, 20, step[6:].shape)
-        #print('%.2f\t' * len(step) %tuple(step))
-        return step
+    def take_step(self, x0):        
+        xy_inds = [('ux' in label) or ('uy' in label) for label in 
+                   self.param_labels]
+        std_inds = ['std' in label for label in self.param_labels]        
+        min_inds = ['minfr' in label for label in self.param_labels]
+        max_inds = ['maxfr' in label for label in self.param_labels]
+        x = copy.copy(x0)
+        x[np.where(xy_inds)] = np.random.uniform(-20, 20, np.sum(xy_inds))
+        x[np.where(std_inds)] = np.random.uniform(1, 80, np.sum(std_inds))
+        x[np.where(min_inds)] = np.random.uniform(1, 100, np.sum(min_inds))
+        x[np.where(max_inds)] = np.random.uniform(1, 100, np.sum(max_inds))
+        return x
         
     def print_fun(self, x, f, accepted):
-        if not np.isinf(f):
+        if not np.isinf(f) and accepted == 1:
+            #g_nr = self.get_gauss(self.x_plot_grid, self.y_plot_grid, 0, x)
+            #g_rw = self.get_gauss(self.x_plot_grid, self.y_plot_grid, 1, x)        
+            #self.plot_gaussian([g_nr, g_rw], self.frmean_space)
             print('%.2f\t' * len(x) %tuple(x))
             print('   f = %1.2f, accepted = %d' %(f, accepted))
+            
+    def eval_fit(self, f_new, x_new, f_old, x_old):
+        ''' Check that the parameters corresponding to this local mininium are
+        within in bounds. This called after each basinhopping iteration.
+        
+        -f_new, f_old: error for the current/last set of parameters, as defined 
+         'error_func' (sums of squares in this case)
+        -x_new, x_old: new parameters for this iteration, and old parameters
+         for the best fit so far
+        '''
+        accept = (np.all(x_new >= self.lb) and np.all(x_new <= self.ub) and
+                  f_new < f_old)
+        return bool(accept)
     
     def get_xy(self):
         ''' all possible x and y locations of the stimuli'''
@@ -682,23 +730,21 @@ class Neuron(object):
         plt.plot(t1, fr1)
         plt.show()
         
-    def psth_map(self, binSize=10, binShift=1):
+    def psth_map(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for each reward condition 
         (reward or no reward) and spatial location
         '''
-        if self.fr_smooth == None:
-                self.smooth_firing_rates(binSize, binShift)     
-        self.get_fr_by_loc()
-        ylim = self.get_ylim()
-        
+        ylim = self.get_ylim()        
         t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)
         fig, ax = plt.subplots(nrows=len(self.y), ncols=len(self.x))
         for xi in range(len(self.x)):
             for yi in range(len(self.y)):
                 #plot
                 plt.sca(ax[len(self.y) - yi - 1, xi])  
-                plt.plot(t, self.fr_space[0, :, xi, yi], color='r')
-                plt.plot(t, self.fr_space[1, :, xi, yi], color='b')            
+                plt.plot(t, self.fr_space[0, :, xi, yi], 
+                         color=self.rew_colors[0], lw=1)
+                plt.plot(t, self.fr_space[1, :, xi, yi], 
+                         color=self.rew_colors[1], lw=1)          
                 plt.plot((0,0), ylim, linestyle='--', color='0.5')
                 #format
                 plt.title('x=%1.1f, y=%1.1f' % (self.x[xi], self.y[yi]), size=6)
@@ -722,23 +768,47 @@ class Neuron(object):
                  ha='center', va='center', rotation='vertical')
         fig.tight_layout()
         
-        #plt.savefig(title + '_psth_map.eps', bbox_inches='tight')
-        plt.show()    
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()    
         
-    def psth_rew(self, binSize=10, binShift=1):
+    def psth_rew(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for cue predicted reward and
         no reward (irrespective of spatial location)
-        '''
-        if self.fr_smooth == None:
-            self.smooth_firing_rates(binSize, binShift)            
+        '''             
         t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)      
         fr0 = np.nanmean(self.fr_smooth[np.array(self.df['rew']==0),:], 0)
         fr1 = np.nanmean(self.fr_smooth[np.array(self.df['rew']==1),:], 0)
-        plt.plot(t, fr0, 'r')
-        plt.plot(t, fr1, 'b')
-        plt.show()   
         
-    def plot_hot_spot(self, min_pos, max_pos):
+        fig, ax = plt.subplots(nrows=2, ncols=1)
+        plt.sca(ax[0])
+        plt.plot(t, fr0, c=self.rew_colors[0])
+        plt.plot(t, fr1, c=self.rew_colors[1])
+        plt.ylabel('Firing rate (sp/s)')
+        
+        plt.sca(ax[1])
+        count = 1
+        for is_rew in range(2):
+            for i in np.where(self.df['rew']==is_rew)[0]:
+                spks = copy.copy(self.df.ix[i, 'spkdata'] - 
+                                 self.df.ix[i, 't_CUE_ON'])
+                spks = spks[(spks >= self.tFrame[0]) & (spks <= self.tFrame[1])]                
+                plt.scatter(spks, [count]*len(spks), c=self.rew_colors[is_rew],
+                            marker='|', linewidth=0.1)
+                count += 1
+        plt.xlim(self.tFrame)
+        plt.ylim((0, count))
+        plt.xlabel('Time relative to cue onset (s)')
+        plt.ylabel('Trial #')
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()   
+        
+    def plot_hot_spot(self, min_pos, max_pos, pdf=None):
         ''' plot mean firing rates on the grid of locations and indicate the
         corresponding preferred and non-preferred regions as determined by
         'define_hot_spot
@@ -747,8 +817,8 @@ class Neuron(object):
         plt.suptitle(self.filename + '_' + self.name, size=8)
         for irew in range(2):
             plt.sca(ax[irew])
-            zmax = np.nanmax(neuron.frmean_space[irew,:,:])
-            zmin = np.nanmin(neuron.frmean_space[irew,:,:])
+            zmax = np.nanmax(self.frmean_space[irew,:,:])
+            zmin = np.nanmin(self.frmean_space[irew,:,:])
             size = 50 * (self.frmean_space[irew,:,:] - zmin) / (zmax - zmin)                 
             plt.scatter(np.ravel(self.x_grid), np.ravel(self.y_grid), 
                         s=np.ravel(size), c=self.rew_colors[irew])
@@ -772,9 +842,13 @@ class Neuron(object):
             plt.xlabel('x (deg)')
             plt.ylabel('y (deg)') 
         fig.tight_layout()
-        plt.show() 
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show() 
         
-    def plot_gaussian(self, g, z):
+    def plot_gaussian(self, g, z, pdf=None):
         
         '''plot gaussian colormap with overlaid scatter of firing rates
            x, y are MxN array (typically denser than observed data points)
@@ -782,8 +856,7 @@ class Neuron(object):
            z is actual firing rates
         '''
         fig, ax = plt.subplots(nrows=1, ncols=np.size(g,0))
-        plt.suptitle(neuron.filename + '_' + neuron.name, size=8)
-        
+        plt.suptitle(self.filename + '_' + self.name, size=8)        
         for k in range(np.size(g,0)):
             
             #colormap
@@ -796,7 +869,7 @@ class Neuron(object):
             plt.xlabel('x (deg)')
             if k == 0:
                 plt.ylabel('y (deg)')                    
-            ax[k].invert_yaxis()
+            ax[k].invert_yaxis()            
     
             #scatter
             x_scatter = (np.ravel(self.x_grid) + self.xy_max) * self.plot_density
@@ -810,12 +883,12 @@ class Neuron(object):
             plt.colorbar(im, cax=cax)
             plt.tick_params(labelsize=8)          
     
-        fig.tight_layout()
-        fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
-                  'mapping_py/mapping/figs/'
-        plt.savefig(fig_dir + neuron.filename + '_' + neuron.name + '_' + 
-                    self.fit_type + '.pdf', bbox_inches='tight')
-        plt.show()
+        fig.tight_layout()    
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()
         
     ### ANALYSIS FUNCTIONS
     def define_hot_spot(self):
@@ -858,24 +931,27 @@ class Neuron(object):
                                     min_pos[irew] = (ix0, ix1, iy0, iy1)
                                     
         if min_pos[0] == None or min_pos[1] == None:
-            pdb.set_trace()
+            ipdb.set_trace()
         return min_pos, max_pos
                                                                           
     ### I/O
         
     def save_neuron(self):    
         ''' Create a pickle of the neuron object '''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
         fname = self.filename + '_' + self.name
-        print('saving:', directory + fname)
-        with open(directory + fname + '.pickle', 'wb') as f:        
+        print('saving:', self.directory + fname)
+        with open(self.directory + fname + '.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
 
 
 class LoadData(object):
-            
+    ''' LoadData object:
+    PURPOSE: Interface for loading saved & processed data files for Session
+    and Neuron Objects
+    FUNCTIONALITY: Just loads them
+    '''        
     def __init__(self):
-        self.directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
+        self.directory = '/Users/syi115/GitHub/MappingData/'
         with open(self.directory + 'mapping_exp.pickle', 'rb') as f:
             self.experiment = pickle.load(f)            
     
@@ -916,139 +992,587 @@ class LoadData(object):
             neuron = pickle.load(f)
         return neuron
         
+class Behavior(object):
+    ''' Behavior object:
+    PURPOSE: get behavioral data from all sessions in order to perform
+    population-level behavioral analyses
+    '''
+    def __init__(self, tFrame=[-500, 500]):
+        self.directory = '/Users/syi115/GitHub/MappingData/'
+        self.save_dir = '/Users/syi115/GitHub/MappingData/'
+        io = LoadData()
+        self.files = np.array(list(io.experiment.files.keys()))
+        self.nfiles = len(self.files)        
+        self.monkey = np.array([0 if file[0]=='t' else 1 
+                                for file in self.files])
+        self.tFrame = tFrame
+        self.nt = self.tFrame[1] - self.tFrame[0] + 1
+                            
+    def extract_data(self):
+        self.lick_rew = np.empty((self.nfiles, self.nt, 2))
+        self.lick_rew_dir = np.empty((self.nfiles, self.nt, 2, 2))
+        self.lick_rew_set = np.empty((self.nfiles, self.nt, 2, 2))
+        self.hr_rew = np.empty((self.nfiles, 2))
+        self.hr_rew_dir = np.empty((self.nfiles, 2, 2))
+        self.hr_rew_set = np.empty((self.nfiles, 2, 2))
+        self.rt_rew = np.empty((self.nfiles, 2))
+        self.rt_rew_dir = np.empty((self.nfiles, 2, 2))
+        self.rt_rew_set = np.empty((self.nfiles, 2, 2))
+        for iFile, file in enumerate(self.files):
+            
+            with open(self.directory + file + '.pickle', 'rb') as f:
+                dat = pickle.load(f)    
+                
+            # add fake reward times for the non-rew trials
+            rewOn = np.array(dat.df['t_REWARD_ON'])
+            isRew = np.array(dat.df['rew'].fillna(99), dtype=int)            
+            succOn = np.array(dat.df['t_SUCCESS'])
+            delay = np.nanmean(rewOn[isRew==1] - succOn[isRew==1])
+            rewOn[(isRew == 0) & ~np.isnan(succOn)] = succOn[(isRew == 0) & ~np.isnan(succOn)] + delay
 
+            # other info
+            cue_set = np.array(dat.df['cue_set'].fillna(99), dtype=int)
+            cue_dir = np.array([1 if x < 0 else 0 if x > 0 else 99 
+                                for x in dat.df['CUE_X']], dtype=int)
+            dat.df['rt'] = dat.df['t_FIX_OUT'] - dat.df['t_TARG_ON']            
+            
+            # licking split by reward           
+            for irew in range(2):
+                inds = np.logical_and(isRew == irew, ~np.isnan(rewOn))
+                self.lick_rew[iFile, :, irew] = self.align_licks(dat.laser, inds, rewOn)            
+            # licking split by reward and direction            
+            for irew in range(2):
+                for idir in range(2):                    
+                    inds = np.logical_and(np.logical_and(isRew == irew, cue_dir == idir), 
+                                          ~np.isnan(rewOn))           
+                    self.lick_rew_dir[iFile, :, irew, idir] = self.align_licks(dat.laser, inds, rewOn)            
+            # licking split by reward and cue set
+            for irew in range(2):
+                for iset in range(2):                    
+                    inds = np.logical_and(np.logical_and(isRew == irew, cue_set == iset), 
+                                          ~np.isnan(rewOn))           
+                    self.lick_rew_set[iFile, :, irew, iset] = self.align_licks(dat.laser, inds, rewOn)
+                    
+            # hit rate by reward
+            for irew in range(2):
+                hits = dat.df.ix[(isRew == irew) & (dat.df['hit'] | dat.df['miss']), 'hit']
+                self.hr_rew[iFile, irew] = hits.sum() / len(hits)                
+            # hit rate by reward and direction
+            for irew in range(2):
+                for idir in range(2):
+                    hits = dat.df.ix[(isRew == irew) & (cue_dir == idir) & 
+                                     (dat.df['hit'] | dat.df['miss']), 'hit']
+                    self.hr_rew_dir[iFile, irew, idir] = hits.sum() / len(hits)            
+            # hit rate by reward and cue set
+            for irew in range(2):
+                for iset in range(2):
+                    hits = dat.df.ix[(isRew == irew) & (cue_set == iset) & 
+                                     (dat.df['hit'] | dat.df['miss']), 'hit']
+                    self.hr_rew_set[iFile, irew, iset] = hits.sum() / len(hits)
+                    
+            # reaction time by reward
+            for irew in range(2):
+                rt = dat.df.ix[(isRew == irew) & dat.df['hit'], 'rt']
+                self.rt_rew[iFile, irew] = rt.mean(skipna=True)
+            # reaction time by reward and direction
+            for irew in range(2):
+                for idir in range(2):
+                    rt = dat.df.ix[(isRew == irew) & (cue_dir == idir) & 
+                                    dat.df['hit'], 'rt']
+                    self.rt_rew_dir[iFile, irew, idir] = rt.mean(skipna=True)            
+            # reaction time by reward and cue set
+            for irew in range(2):
+                for iset in range(2):
+                    rt = dat.df.ix[(isRew == irew) & (cue_set == iset) & 
+                                    dat.df['hit'], 'rt']
+                    self.rt_rew_set[iFile, irew, iset] = rt.mean(skipna=True)
+                
 
-
-if __name__ == '__main__':
+    def align_licks(self, laser, inds, etimes):
+        licks = [laser[i] for i in range(len(laser)) if inds[i]]
+        zero_inds = np.array(np.round(etimes[inds]*1000), dtype=int)
+        out = np.empty((len(licks), self.nt))
+        for i, lick in enumerate(licks):
+            try:
+                out[i,:] = lick[zero_inds[i] + self.tFrame[0] : zero_inds[i] + self.tFrame[1]+1]
+            except:
+                ipdb.set_trace()
+        return np.nanmean(out, axis=0)
+        
+    def save_behavior(self):
+        ''' Create a pickle of the behavior object '''        
+        fname = 'behavioral_data'
+        print('saving:', self.save_dir + fname)
+        with open(self.save_dir + fname + '.pickle', 'wb') as f:        
+            pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
+                            
+class Population(object):
+    ''' Population object:
+    PURPOSE: To prepare for population-level analyses by running through all
+    neurons, fitting gaussian functions, and save these coefficients (this can
+    take a while, especitally when using main iterations for basinhopping
+    algorithm)
+    FUNCTIONALITY: Fits the functions, and saves these results - to be 
+    utilized by Classifier object
+    '''
     
-    # initialize Experiment, and load information    
-    finfo = sp.io.loadmat(
-        '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping/files/' + 
-        'map_cell_list.mat', squeeze_me=True)
-        
-    # changed to zero based inds
-    finfo['cell_ind'] -= 1
-    finfo['file_ind'] -= 1        
+    def __init__(self):
+        self.io = LoadData()
+        self.ncells = 0
+        for file in self.io.experiment.files:
+            self.ncells += len(self.io.experiment.files[file])
+        self.betas = np.empty((1,))
+        self.mse = np.empty((self.ncells,))            
+            
+    def fit_gaussians(self, niter=100):
+        icell = 0
+        for file in self.io.experiment.files:
+            for cell in self.io.experiment.files[file]:                
+                # load neuron object
+                print('Loading neuron', file, cell)
+                neuron = self.io.load_neuron(file, cell)                
+                # X/Y information for stimuli in mapping experiment
+                neuron.get_xy()
+                neuron.get_xy_grid()                 
+                # Computer firing rates for each location in experiment
+                neuron.get_frmean_by_loc((.1,.5))                             
+                # Use firing rates to determine initial guess paramaters for 2d 
+                # gaussian fit
+                neuron.get_initial_params()                
+                # Fit guassian function with 'basinhopping' algorithm in attempt
+                # find a global minimum in this paramater space
+                results = neuron.fit_gaussian(niter=niter)
+                # record results
+                if len(self.betas) == 1:
+                    self.betas = np.empty((self.ncells, len(results.x)))
+                self.betas[icell,:] = results.x
+                self.mse[icell] = results.fun
+                icell += 1
+                
+    def save_params(self):
+        ''' Create a pickle of the neuron object '''
+        directory = '/Users/syi115/GitHub/MappingData/'
+        fname = 'populations_params'
+        print('saving:', directory + fname)
+        with open(directory + fname + '.pickle', 'wb') as f:        
+            pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
+            
 
-    # test data
-    directory = '/Users/cjpeck/Documents/Matlab/Blackrock/Data/MAP_PY/'        
-    for i in range(len(finfo['filenames'])):
-        f = sp.io.loadmat(directory + finfo['filenames'][i] + '.nex.mat', 
-                          squeeze_me=True, struct_as_record=True)
-        cells = finfo['cell_name'][finfo['file_ind'] == i]  
-        #session = Session(f, finfo['filenames'][i], cells, True)
-        for cell in cells:                      
-            neuron = Neuron(f, finfo['filenames'][i], cell)
+class Classifier(object):
+    ''' Classifier object:
+    PURPOSE: To do population-level analysis on the 
+    coefficients of the Gaussian-fits for each individual neuron. 
+    FUNCTIONALITY: This loads a Population object (with stored, fitted paramters) 
+    and had methods (mainly from scikit-learn) for analyzing this data.
+    '''
+    
+    def __init__(self):                
         
+        # load population data        
+        directory = '/Users/syi115/GitHub/MappingData/'
+        fname = 'populations_params'
+        with open(directory + fname + '.pickle', 'rb') as f:        
+            self.pop = pickle.load(f)
+        
+        finfo = get_file_info()
+        files = finfo['filenames'][finfo['file_ind']]
+        self.monkey = np.array([0 if file[0]=='t' else 1 for file in files])
+        if self.monkey.shape[0] != self.pop.betas.shape[0]:
+            ipdb.set_trace()        
+            
+        # experiment information - CHANGE TO LOAD FROM ELSEWHERE IN CASE 
+        # OF FUTURE CHANGES
+        self.x = np.array([-12.8, -6.4, 0, 6.4, 12.8])
+        self.y = np.array([-12.8, -6.4, 0, 6.4, 12.8])
+        self.param_labels = ['ux', 'uy', 'stdx', 'stdy',
+                             'minfr_nr', 'maxfr_nr', 'minfr_rw', 'maxfr_rw']
+        
+        # plot parameters
+        self.xy_max = 20
+        self.plot_density = 10 #points per degree
+        self.my_colors = ['c', 'r', 'k', 'b', 'm', 'g']
+                             
+    def get_betas_dict(self, betas):
+        return {self.param_labels[i]: betas[:,i] 
+                for i in range(len(self.param_labels))}
+                
+    def get_good_betas(self, monkey=None):       
+        # NEED TO CHANGE THIS TO SOME GOOD FIT CRITERION     
+        if monkey == None:
+            neurons = np.where(self.pop.mse > 1e-10)[0]
+        elif monkey==0 or monkey==1:
+            neurons = np.where((self.pop.mse > 1e-10) & (self.monkey==monkey))[0]
+        return self.pop.betas[neurons,:]
+        
+    def pca(self, n_components=2, plot_it=False):
+        X = self.get_good_betas()
+        pca = PCA(n_components=n_components)
+        X1 = pca.fit_transform(X)
+        if plot_it==True:
+            plt.figure()
+            plt.scatter(X1[:,0], X1[:,1])
+            plt.xlabel('PC1')
+            plt.ylabel('PC2')
+            plt.title('n = %d' %(X.shape[0]))
+            plt.show()
+        return X1
+
+    def kmeans(self, X, X1, n_clusters=2):
+        kmeans = KMeans(n_clusters=n_clusters)
+        kmeans.fit(X)
+        # clustering on dim reduced data
+        plt.figure()
+        colors = self.get_colors(kmeans.labels_)
+        plt.scatter(X1[:,0], X1[:,1], c=colors)
+        plt.xlabel('PC1')
+        plt.ylabel('PC2')
+        plt.show()
+        return kmeans.labels_
+        
+    def kmeans_exploratory(self, X, labels):
+        ''' exporatory analyses comparing proporties of the groups defined
+        by a kmeans cluster
+        
+        X: betas from 2d gaussian fit
+        labels: grouping by kmeans
+        
+        self.param_labels = ['ux', 'uy', 'stdx', 'stdy',
+                             'minfr_nr', 'maxfr_nr', 'minfr_rw', 'maxfr_rw']
+        '''               
+        
+        colors = self.get_colors(labels)
+        for i,j in combinations(range(X.shape[1]), 2):
+            if i > 3 and j > 3:
+                plt.figure()            
+                plt.scatter(X[:,i], X[:,j], c=colors)
+                plt.xlabel(self.param_labels[i])
+                plt.ylabel(self.param_labels[j])
+                plt.show()                    
+
+            
+    def kmeans_targeted(self, X, labels):  
+        ''' specific analyses comparing proporties of the groups defined
+        by a kmeans cluster
+        
+        X: betas from 2d gaussian fit
+        labels: grouping by kmeans
+        '''      
+        colors = self.get_colors(labels)
+        d = self.get_betas_dict(X)
+        d_labels = self.get_colors_dict(labels)
+        plt.figure()
+        x = d['maxfr_rw'] - d['minfr_rw']
+        y = d['maxfr_nr'] - d['minfr_nr']
+        plt.scatter(x, y, c=colors)
+        plt.xlabel('maxfr_rw - minfr_rw')
+        plt.ylabel('maxfr_nr - minfr_nr')
+        plt.title(d_labels)
+        plt.show()
+        
+    def get_colors(self, labels):        
+        return [self.my_colors[x] for x in labels]
+        
+    def get_colors_dict(self, labels):
+        d = {}
+        for i in np.unique(labels):
+            d[i] = self.my_colors[i]
+        return d
+    
+    def heatmaps(self, X, labels):
+        ''' plot heatmaps for the mean parameters of each cluster
+        '''
+        self.get_xy_plot_grid()
+        for i in np.unique(labels):
+            Xgroup = X[labels==i, :].mean(axis=0)  
+            g_nr = self.get_gauss(0, Xgroup)
+            g_rw = self.get_gauss(1, Xgroup)
+            self.plot_gaussian([g_nr, g_rw], ['No reward', 'Reward'], 
+                               'Kmeans group ' + str(i), Xgroup)
+                        
+    def plot_gaussian(self, g, cond_labels, title, betas):
+        
+        '''plot gaussian colormap
+           g is a MxNxK array where K is the number of conditions
+           z is actual firing rates
+        '''
+        fig, ax = plt.subplots(nrows=1, ncols=np.size(g,0))        
+        plt.suptitle(title)
+        for k in range(np.size(g,0)):            
+            # colormap
+            plt.sca(ax[k])
+            im = plt.imshow(np.transpose(g[k]), vmin=np.nanmin(g), 
+                            vmax=np.nanmax(g))
+            plt.xticks((self.xy_max + self.x) * self.plot_density, self.x)
+            plt.yticks((self.xy_max + self.y) * self.plot_density, self.y)
+            plt.tick_params(labelsize=8)
+            plt.xlabel('x (deg)')
+            if k == 0:
+                plt.ylabel('y (deg)')                    
+            ax[k].invert_yaxis()
+            # plot the center
+            x_scatter = (betas[0] + self.xy_max) * self.plot_density
+            y_scatter = (betas[1] + self.xy_max) * self.plot_density
+            plt.scatter(x_scatter, y_scatter, marker='o', c='k')
+            # format
+            divider = make_axes_locatable(ax[k])
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            plt.colorbar(im, cax=cax)
+            plt.tick_params(labelsize=8)  
+            plt.title(cond_labels[k])    
+        fig.tight_layout()
+        plt.show()
+        
+    def get_gauss(self, is_rew, betas0):
+        ''' g = min(4) + max-min(5) * 
+            exp( - ((x-ux(0))/stdx(2))**2 - ((y-uy(1))/stdy(3))**2)
+        '''
+        if is_rew:
+            k = 2
+        else:
+            k = 0
+        x_part = ((self.x_plot_grid - betas0[0]) / betas0[2]) ** 2
+        y_part = ((self.y_plot_grid - betas0[1]) / betas0[3]) ** 2
+        g = betas0[k+4] + betas0[k+5] * np.exp(-x_part/2 - y_part/2)              
+        return g        
+    
+    def get_xy_plot_grid(self):    
+        ''' Grid coordinates for plotting 2d Gaussian fit'''
+        x_plot = np.linspace(-self.xy_max, self.xy_max, 
+                             2 * self.plot_density * self.xy_max + 1)
+        y_plot = x_plot
+        # grid of locations for plotting
+        self.x_plot_grid = np.full([len(x_plot), len(y_plot)], 0, dtype=float)
+        self.y_plot_grid = np.full([len(x_plot), len(y_plot)], 0, dtype=float)
+        for xi in range(len(x_plot)):
+            for yi in range(len(y_plot)):
+                self.x_plot_grid[xi, yi] = x_plot[xi]
+                self.y_plot_grid[xi, yi] = y_plot[yi]
+                
+class PopParams(object):
+    
+    def __init__(self):
+        self.directory = '/Users/syi115/GitHub/MappingData/'      
+        fname = 'model_testng'
+        print('saving:', self.directory + fname)
+        with open(self.directory + fname + '.pickle', 'rb') as f:        
+            params = pickle.load(f)
+        
+        self.param_labels = ['ux', 'uy', 'stdx', 'stdy',
+                             'minfr_nr', 'maxfr_nr', 'minfr_rw', 'maxfr_rw']  
+        self.method = 'Nelder-Mead'
+        self.df = pd.DataFrame([x[1] for x in params[self.method]], 
+                               columns=self.param_labels)
+    
+    def xy_plot_info(self):      
+        ux = self.df['ux']
+        uy = self.df['uy']
+        comp = (self.df['minfr_rw'] - self.df['minfr_nr']) / \
+               (self.df['minfr_rw'] + self.df['minfr_nr'])
+        thresh = 0.6
+        
+        pos_mean = (ux[comp > thresh].mean(), uy[comp > thresh].mean())
+        pos_sem = (ux[comp > thresh].sem(), uy[comp > thresh].sem())
+        neg_mean = (ux[comp < -thresh].mean(), uy[comp < -thresh].mean())
+        neg_sem = (ux[comp < -thresh].sem(), uy[comp < -thresh].sem())
+
+        colors = [(0,0,1) if x > thresh 
+                  else (1,0,0) if x < -thresh 
+                  else (0.3, 0.3, 0.3) for x in comp]
+        size = [30 if abs(x) > thresh 
+                else 10 for x in comp]
+        return ux, uy, pos_mean, pos_sem, neg_mean, neg_sem, colors, size
+                   
+    def xy_scatter(self):                        
+        ux, uy, pos_mean, pos_sem, neg_mean, neg_sem, colors, size = \
+            self.xy_plot_info()
+                
+        plt.figure()        
+        plt.scatter(ux, uy, 
+                    c=colors, s=size, linewidths=0, alpha=0.5)        
+        plt.show()
+        
+        plt.figure()
+        plt.scatter(pos_mean[0], pos_mean[1], c='b', s=30)
+        plt.errorbar(pos_mean[0], pos_mean[1], pos_sem[1], pos_sem[0], c='b')
+        plt.scatter(neg_mean[0], neg_mean[1], c='r', s=30)
+        plt.errorbar(neg_mean[0], neg_mean[1], neg_sem[1], neg_sem[0], c='r')
+        plt.show()
+        
+    def xy_scatter_bokeh(self):        
+        from bokeh.plotting import output_server, figure, scatter, show
+        ux, uy, pos_mean, pos_sem, neg_mean, neg_sem, colors, size = \
+            self.xy_plot_info()
+        output_server("scatter.html")
+        figure(tools="pan,wheel_zoom,box_zoom,reset,previewsave,select")
+        
+        scatter(ux, uy, color="#FF00FF", nonselection_fill_color="#FFFF00", nonselection_fill_alpha=1)
+        scatter(ux, uy, color="red")
+        scatter(ux, uy, marker="square", color="green")
+        scatter(ux, uy, marker="square", color="blue", name="scatter_example")
+        
+        show()
+
+                    
+def demo(one_example=True):
+    
+    io = LoadData()
+    if one_example == True:
+        demo_neurons = {'tn_map_123014': ['elec11U']}
+    else:
+        demo_neurons = {'tn_map_120914': ['elec10a', 'elec21a'],
+                        'tn_map_123014': ['elec11U', 'elec9U'], 
+                        'tn_map_122914': ['elec7U'],
+                        'tn_map_121614': ['elec17U', 'elec3b'], 
+                        'tn_map_121214': ['elec13U'], 
+                        'tn_map_121114': ['elec11U']}
+    for file in demo_neurons:
+        for cell in demo_neurons[file]:
+            
+            # load neuron object
+            print('Loading neuron', file, cell)
+            neuron = io.load_neuron(file, cell)
+            
+            # X/Y information for stimuli in mapping experiment
             neuron.get_xy()
             neuron.get_xy_grid()
             neuron.get_xy_plot_grid()    
-            neuron.get_frmean_by_loc((.1,.5))
+
+            # Firing sorted by reward condition (ignoring spatial location)            
+            neuron.smooth_firing_rates()            
+            neuron.psth_rew()
             
-            min_pos, max_pos = neuron.define_hot_spot()
-            neuron.plot_hot_spot(min_pos, max_pos)                
-    
-            #compare basinhop vs. lsq        
-            neuron.fit_type = 'lsq'
-            neuron.get_initial_params()
-            neuron.fit_gaussian()
-            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, neuron.betas)
-            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
+            # Firing rates for each location in experiment
+            neuron.get_frmean_by_loc((.1,.5))      
+            neuron.psth_map()  
             
-            neuron.fit_type = 'basinhop'
+            # Use firing rates to determine initial guess paramaters for 2d 
+            # gaussian fit
             neuron.get_initial_params()
+            
+            # Fit guassian function with 'basinhopping' algorithm in attempt
+            # find a global minimum in this paramater space
             neuron.fit_gaussian()
-            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, neuron.betas)
-            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
-            break
-        break
-    error = neuron.error_func(neuron.betas)
+            
+            # Get high-res guassian for plotting based on the fitted parameters
+            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
+                                    neuron.betas)
+            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
+                                    neuron.betas)        
+            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space) 
     
     
-    #option for constraining STD estimates
+def get_file_info():
+    # initialize Experiment, and load information    
+    finfo = sp.io.loadmat(
+        '/Users/syi115/GitHub/MappingData/src/map_cell_list.mat', 
+        squeeze_me=True)        
+    # changed to zero based inds
+    finfo['cell_ind'] -= 1
+    finfo['file_ind'] -= 1      
+    return finfo
+    
+def create_all(overwrite=True):
+    ''' Create all Sessions & Neuron objects '''
+    finfo = get_file_info()
+    directory = '/Users/syi115/GitHub/MappingData/src/'
+    exp = Experiment(overwrite)
+    for iFile, file in enumerate(finfo['filenames']):
+        if not file in exp.files or overwrite:
+            f = sp.io.loadmat(directory + file + '.nex.mat', squeeze_me=True)
+            print('Loaded file', file)
+            cells = finfo['cell_name'][finfo['file_ind'] == iFile]             
+            exp.add_session(f, file, cells)        
+    exp.save_experiment() 
 
+def overwrite_sessions():
+    ''' Create all Sessions & Neuron objects '''
+    finfo = get_file_info()
+    directory = '/Users/syi115/GitHub/MappingData/src/'    
+    for iFile, fname in enumerate(finfo['filenames']):
+        f = sp.io.loadmat(directory + fname + '.nex.mat', squeeze_me=True)
+        print('Loaded file', fname)
+        session = Session(f, fname, [])
+        session.save_session()
+    
+def load_neurons_and_plot(start_ind=0):
+    ''' load all Neuron objects and plot them '''
+    io = LoadData()
+    fig_dir = '/Users/syi115/GitHub/Mapping/figs/'
+    for i, file in enumerate(io.experiment.files):
+        if i >= start_ind:
+            for cell in io.experiment.files[file]:                
+                                        
+                # load neuron object
+                print('Loading neuron', file, cell)
+                neuron = io.load_neuron(file, cell)
+                with PdfPages(fig_dir + neuron.filename + '_' + neuron.name + 
+                              '.pdf') as pdf:
+                    
+                    # X/Y information for stimuli in mapping experiment
+                    neuron.get_xy()
+                    neuron.get_xy_grid()
+                    neuron.get_xy_plot_grid()    
+                    
+                    # Computer firing rates for each location in experiment
+                    neuron.smooth_firing_rates()
+                    neuron.get_frmean_by_loc((.1,.5))
+                    neuron.get_fr_by_loc()
+                                        
+                    neuron.psth_map(pdf)                
+                    neuron.psth_rew(pdf)                    
+                    
+                    #min_pos, max_pos = neuron.define_hot_spot()
+                    #neuron.plot_hot_spot(min_pos, max_pos)                
+                    
+                    # Use firing rates to determine initial guess paramaters for 2d 
+                    # gaussian fit
+                    neuron.get_initial_params()
+                    
+                    # Fit guassian function with 'basinhopping' algorithm in attempt
+                    # find a global minimum in this paramater space
+                    neuron.fit_gaussian(niter=1)
+                    
+                    # Get high-res guassian for plotting based on the fitted parameters
+                    g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, 
+                                            neuron.betas)
+                    g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, 
+                                            neuron.betas)        
+                    neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space, pdf)
+                    
 
-#    io = LoadData()
-#    for file in io.experiment.files:
-#        for cell in io.experiment.files[file]:
-#            neuron = io.load_neuron(file, cell)
-#            neuron.psth_map()    
-#            min_pos, max_pos = neuron.define_hot_spot((.1, .5))
-#            neuron.plot_hot_spot(min_pos, max_pos)    
-#            break
-#        break            
+if __name__ == '__main__':     
     
-    # test smooth firing rates procedure    
-#    neuron.smooth_firing_rates(10, 1)    
-#    t0 = np.mean(np.c_[neuron.tStart, neuron.tEnd],1)
-#    t1 = np.mean(np.c_[neuron.tStart_smooth, neuron.tEnd_smooth],1)
-#    fr0 = np.nanmean(neuron.fr, 0)
-#    fr1 = np.nanmean(neuron.fr_smooth, 0)
-#    plt.figure()
-#    plt.plot(t0, fr0)
-#    plt.plot(t1, fr1)
-#    plt.show()
-                          
-#    # add neuron by file  
-#    overwrite = True
-#    exp = Experiment(overwrite)
-#    for iFile, file in enumerate(finfo['filenames']):
-#        # load file
-#        f = sp.io.loadmat(directory + file + '.nex.mat', squeeze_me=True)
-#        print('Loaded file', file)
-#        cells = finfo['cell_name'][finfo['file_ind'] == iFile]             
-#        exp.add_session(f, file, cells)        
-#    exp.save_experiment()              
-        
-#    # a test
-#    n = Neuron(f, file, cells[0])
-#    for iTrial in range(60):
-#        if iTrial in n.df.index:
-#            print(iTrial, len(n.df['spkdata'].loc[iTrial]), 'spikes')
-#        else:
-#            print(iTrial, 'not in DataFrame')
+    #Wcreate_all(overwrite=True)
 
-#    # Query time
-#    s = set()
-#    l = []
-#    a = np.full(np.shape(finfo['cell_name']), 'nan', dtype=object)
-#    for i, name in enumerate(finfo['cell_name']):
-#        fname = finfo['filenames'][finfo['file_ind'][i]] + '_' + name
-#        s.add(fname)
-#        l.append(fname)
-#        a[i] = fname
-#    
-#    tests = ['tn_map_120314_elec1U', 'tn_map_120914_elec21U', 'tn_map_123014_elec31b']
-#    t_set = [0]*len(tests)
-#    t_list = [0]*len(tests)
-#    t_array = [0]*len(tests)
-#    for t in range(len(tests)):
-#        start = time.time()
-#        tests[t] in s
-#        t_set[t] = time.time() - start
-#        start = time.time()
-#        tests[t] in l
-#        t_list[t] = time.time() - start
-#        start = time.time()
-#        tests[t] in a
-#        t_array[t] = time.time() - start
-#    print('set:', t_set)
-#    print('list:', t_list)
-#    print('array:', t_array)
+    #b = Behavior()
+    #b.extract_data()
+    #b.save_behavior()    
     
-#    io = LoadData()
-#    fsession0 = io.load_session('tn_map_123014')
-#    print(fsession0.filename)
-#    fsession = io.load_session('asdf')
-#    print(fsession.filename)
-#    fneuron0 = io.load_neuron('tn_map_123014', 'elec1U')
-#    print(fneuron0.filename, fneuron0.name)
-#    fneuron = io.load_neuron('aasdf', 'asdf')
-#    print(fneuron.filename, fneuron.name)
+    #load_neurons_and_plot(start_ind=0)
+    #create_all(overwrite=True)
+    #overwrite_sessions()
+    demo()
     
+    #p = Population()
+    #p.fit_gaussians(niter=100)
+    #p.save_params()
     
+    #b = Behavior()
+    #b.extract_data()
+    #b.save_behavior()      
     
+    #pop = PopParams()
+    #pop.xy_scatter()
     
-        
+    '''
+    # create clasifier object    
+    c = Classifier()   
+    X = c.get_good_betas(monkey=None)
+    X1 = c.pca(plot_it=False)    
+    
+    # classify neurons into 'n_clusters' groups
+    labels = c.kmeans(X, X1, n_clusters=3)
+    c.kmeans_exploratory(X, labels)
+    c.kmeans_targeted(X, labels)
+    c.heatmaps(X, labels)    
+    '''
