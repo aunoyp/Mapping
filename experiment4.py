@@ -10,7 +10,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 import os
 import pandas as pd
-import pdb
+import ipdb
 import pickle
 import scipy as sp
 import scipy.io
@@ -126,7 +126,7 @@ class Session(object):
                   f['dat'][()]['data']['laser_dt'][i])                     
             if sum([abs(x - 0.001) > 10e-6 for x in dt]):                
                 print('analog dt is not 1000hz')
-                pdb.set_trace()        
+                ipdb.set_trace()        
             # check that the start time of analog data collection is about 0,
             # pad with NaNs if start is slightly after zero
             t0 = (f['dat'][()]['data']['eyes_start_t'][i], 
@@ -136,10 +136,10 @@ class Session(object):
                 nans_to_add = nans_to_add.pop()
             else:
                 print('different t0 for each analog data type')
-                pdb.set_trace()
+                ipdb.set_trace()
             if nans_to_add > 5:
                 print('analog start time is > 5 ms')
-                pdb.set_trace()
+                ipdb.set_trace()
             # these are lists (for every trial) 
             # of numpy arrays (for every data point)    
             self.eyes.append(np.vstack((np.full((nans_to_add,2), np.nan), 
@@ -563,6 +563,7 @@ class Neuron(object):
         ''' Computes the mean firing rate for each spatial location '''
         t = self.get_mean_t(tMean)
         self.frmean_space = np.empty((2, len(self.x), len(self.y)))
+        ipdb.set_trace()
         for ix in range(len(self.x)):
             for iy in range(len(self.y)):
                 for irew in range(2):
@@ -935,7 +936,7 @@ class Neuron(object):
                                     min_pos[irew] = (ix0, ix1, iy0, iy1)
                                     
         if min_pos[0] == None or min_pos[1] == None:
-            pdb.set_trace()
+            ipdb.set_trace()
         return min_pos, max_pos
                                                                           
     ### I/O
@@ -1100,7 +1101,7 @@ class Behavior(object):
             try:
                 out[i,:] = lick[zero_inds[i] + self.tFrame[0] : zero_inds[i] + self.tFrame[1]+1]
             except:
-                pdb.set_trace()
+                ipdb.set_trace()
         return np.nanmean(out, axis=0)
         
     def save_behavior(self):
@@ -1182,7 +1183,7 @@ class Classifier(object):
         files = finfo['filenames'][finfo['file_ind']]
         self.monkey = np.array([0 if file[0]=='t' else 1 for file in files])
         if self.monkey.shape[0] != self.pop.betas.shape[0]:
-            pdb.set_trace()        
+            ipdb.set_trace()        
             
         # experiment information - CHANGE TO LOAD FROM ELSEWHERE IN CASE 
         # OF FUTURE CHANGES
@@ -1546,7 +1547,7 @@ def load_neurons_and_plot(start_ind=0):
 
 if __name__ == '__main__':     
     
-    create_all(overwrite=True)
+    #Wcreate_all(overwrite=True)
 
     #b = Behavior()
     #b.extract_data()
@@ -1555,7 +1556,7 @@ if __name__ == '__main__':
     #load_neurons_and_plot(start_ind=0)
     #create_all(overwrite=True)
     #overwrite_sessions()
-    #demo()
+    demo()
     
     #p = Population()
     #p.fit_gaussians(niter=100)
