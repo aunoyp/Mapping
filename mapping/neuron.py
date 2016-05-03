@@ -1,172 +1,17 @@
 # -*- coding: utf-8 -*-
 
-from collections import OrderedDict
-import matplotlib.pyplot as plt
+import copy
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
+import os
 import pandas as pd
-import pdb
 import pickle
+import matplotlib.pyplot as plt
 import scipy as sp
 import scipy.optimize
 import scipy.signal
-import scipy.io
-
-#import matplotlib
-#matplotlib.use('agg')
-#matplotlib.font_manager.fontManager.defaultFont['ttf'] = \
-#'/Users/cjpeck/anaconda/lib/python3.4/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
-#plt.figure
-#plt.scatter([1,2,3], [1,2,3])
-#h = plt.gca()
-#fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
-#              'mapping_py/mapping/figs/'
-#plt.savefig(fig_dir + 'test.pdf')
-
-#plt.rcdefaults()
-
-#plt.rc('font', **{'family':'fantasy'})
-
-#plt.rc('font', family='sans-serif') 
-#plt.rc('font', serif='Helvetica') 
-#plt.rc('text', usetex='false') 
-
-#plt.rcParams['font.sans-serif'] = ['Helvetica']
-#plt.rcParams['font.sans-serif'].remove('Helvetica')
-#plt.rcParams['font.sans-serif'].insert(0, 'Helvetica')
-#plt.rcParams['font.sans-serif'].remove('Bitstream Vera Sans')
 
 
-
-'''
-Git command line:
-
-git add 'experiment.py'
-git commit -m 'updated experiment.py'
-git remote add origin https://github.com/cjpeck/Mapping.git
-git push -u origin master
-
-General structure:
-   Experiment:
-       files - list of files in that experiment
-   Session:
-       neurons - list of neurons in that session
-       analog data
-   Neuron
-       df (DataFrame) - trial info & spikes
-       firing rates
-'''
-
-class Experiment(object):    
-    '''Experiment object: Maintains dictionary of experiment sessions and 
-    corresponding neurons.'''    
-    def __init__(self, OVERWRITE=False):
-        ''' Initialize dictionary'''
-        self.files = OrderedDict()
-        self.OVERWRITE = OVERWRITE
-            
-    def add_session(self, f, fname, cells):       
-        '''Add a session to the dictionary and create the 'Session' object for 
-        that sessions.
-        
-        If session is already in the dictionary, do nothing unless 
-        self.OVERWRITE = True
-        '''        
-        if len(cells)==0: 
-            print(fname, ' has no cells?') 
-            return
-        if not fname in self.files or self.OVERWRITE:
-            self.files[fname] = cells
-            session = Session(f, fname, cells, self.OVERWRITE)
-            session.save_session()
-            
-    def save_experiment(self):
-        '''Save experiment file'''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
-        print('saving: mapping_exp')
-        with open(directory + 'mapping_exp.pickle', 'wb') as f:        
-            pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
-                                    
-class Session(object):
-    '''Session object: Maintains list of cells in that session and contains
-    analog behavioral data relevent to all cells in that session.
-    '''        
-    def __init__(self, f, fname, cells, OVERWRITE=False):
-        ''' Initialize list of cells names.'''
-        self.neurons = []
-        self.filename = fname
-        self.ntrials = len(f['dat'][()]['data'])
-        self.OVERWRITE = OVERWRITE      
-        if type(cells) == str:
-            self.add_neuron(f, fname, cells)
-        else:
-            for cell in cells:
-                self.add_neuron(f, fname, cell)
-        self.eyes = []
-        self.laser = []
-        self.pupil = []
-        self.process_analog_data(f)
-        
-    def add_neuron(self, f, fname, cellname):
-        '''Append neuron names to list of neurons in that session. Create
-        'neuron' objects for all neurons in that session. 
-        
-        if neuron is already in the list, do nothing unless 
-        self.OVERWRITE = True
-        
-        Neuron in the names are in the format 'session_name' + '_' + 
-        'neuron_name' in order to uniquely name all neuron objects
-        '''
-        cell_fname = fname + '_' + cellname
-        if not cell_fname in self.neurons or self.OVERWRITE:
-            self.neurons.append(cell_fname)            
-            neuron = Neuron(f, fname, cellname)
-            neuron.save_neuron()
-            
-    def process_analog_data(self, f):
-        '''Clean behavoral analog data inclding eye position, laser, and
-        pupil diameter
-        '''                
-        for i in range(self.ntrials):
-            # checks to make sure the sampling frequency is 1000hz 
-            dt = (f['dat'][()]['data']['eyes_dt'][i], 
-                  f['dat'][()]['data']['laser_dt'][i],
-                  f['dat'][()]['data']['pupil_dt'][i])                     
-            if sum([abs(x - 0.001) > 10e-6 for x in dt]):                
-                print('analog dt is not 1000hz')
-                pdb.set_trace()        
-            # check that the start time of analog data collection is about 0,
-            # pad with NaNs if start is slightly after zero
-            t0 = (f['dat'][()]['data']['eyes_start_t'][i], 
-                  f['dat'][()]['data']['laser_start_t'][i],
-                  f['dat'][()]['data']['pupil_start_t'][i])                   
-            nans_to_add = {round(x / 1e-3) for x in t0}            
-            if len(nans_to_add) == 1:
-                nans_to_add = nans_to_add.pop()
-            else:
-                print('different t0 for each analog data type')
-                pdb.set_trace()
-            if nans_to_add > 5:
-                print('analog start time is > 5 ms')
-                pdb.set_trace()
-    
-            self.eyes.append(np.vstack((np.full((nans_to_add,2), np.nan), 
-                                        np.array(f['dat'][()]['data']['eyes'][i], 
-                                        dtype=float))))
-            self.laser.append(np.hstack((np.full((nans_to_add,), np.nan), 
-                                        np.array(f['dat'][()]['data']['laser'][i], 
-                                        dtype=float)))) 
-            self.pupil.append(np.hstack((np.full((nans_to_add,), np.nan), 
-                                        np.array(f['dat'][()]['data']['pupil'][i], 
-                                        dtype=float))))                                        
-            
-    def save_session(self):
-        '''Save session object'''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
-        print('saving:', self.filename)
-        with open(directory + self.filename + '.pickle', 'wb') as f:        
-            pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
-    
 class Neuron(object):
     '''Neuron object: Contrains all data relevant to analyzing neural spiking
     
@@ -180,9 +25,13 @@ class Neuron(object):
     -self.tInt: size of firing rate time bins
     -self.tShift: time shift between successive time bins
     
+    -ver3: same std for reward and no reward now
     '''
+
     def __init__(self, f, fname, cellname):    
         
+        self.directory = '/Users/syi115/GitHub/MappingData/'
+            
         # cell info
         self.filename = fname
         self.name = cellname        
@@ -221,9 +70,14 @@ class Neuron(object):
         self.frmean_space = None
         
         # fit parameters for 2d gaussian
-        self.fit_type = 'basinhop'
+        self.param_labels = ['ux', 'uy', 'stdx', 'stdy',
+                             'minfr_nr', 'maxfr_nr', 'minfr_rw', 'maxfr_rw']        
+        self.lb = [-40, -40, 0, 0,
+                   0, 0, 0, 0]
+        self.ub = [40, 40, 100, 100,
+                   200, 200, 200, 200]
         self.betas = None
-        
+
         # plotting params for 2d gaussians
         self.xy_max = 20
         self.plot_density = 10 #points per degree
@@ -241,18 +95,14 @@ class Neuron(object):
         
         # which side of the screen is contralateral to the recording site?
         # left: -1, right: 1
-        tmp = f['dat'][()]['data']['CUE_X'][f['dat'][()]['data']['CUE_CONTRA'] 
-                == 1]
-        tmp = np.unique(np.sign(tmp, dtype=int))
+
+        tmp = f['dat'][()]['data']['CUE_X'][f['dat'][()]['data']['CUE_CONTRA'] == 1]
+        tmp = np.unique(np.array(np.sign(tmp), dtype=int))
         if len(tmp)==1:
             self.contra = tmp[0]
         else:
             print('cant determine which side is conta')
 
-        #parameters for gaussian fit
-        self.param_labels = ['ux', 'uy', 'stdx_nr', 'stdy_nr', 'stdx_rw', 
-                             'stdy_rw', 'minfr_nr', 'maxfr_nr', 'minfr_rw', 
-                             'maxfr_rw']
         # get the the data            
         self.process(f, fname, cellname)
         
@@ -485,8 +335,8 @@ class Neuron(object):
     
         self.fr_smooth = self.fr_smooth[:, ::binShift]
         self.tStart_smooth = self.smooth_time_points(self.tStart, binSize, binShift)            
-        self.tEnd_smooth = self.smooth_time_points(self.tEnd, binSize, binShift)    
-    
+        self.tEnd_smooth = self.smooth_time_points(self.tEnd, binSize, binShift)
+
     def smooth_time_points(self, t, binSize, binShift):   
         '''After smoothing firing rates, get the corresponding time windows'''
         return np.convolve(t, np.ones((binSize,)) / binSize, 
@@ -521,11 +371,11 @@ class Neuron(object):
             exp( - ((x-ux(0))/stdx(2))**2 - ((y-uy(1))/stdy(3))**2)
         '''
         if is_rew:
-            k = 4
-        else:
             k = 2
-        x_part = ((x - betas0[0]) / betas0[k]) ** 2
-        y_part = ((y - betas0[1]) / betas0[k+1]) ** 2
+        else:
+            k = 0
+        x_part = ((x - betas0[0]) / betas0[2]) ** 2
+        y_part = ((y - betas0[1]) / betas0[3]) ** 2
         g = betas0[k+4] + betas0[k+5] * np.exp(-x_part/2 - y_part/2)              
         return g        
                 
@@ -544,76 +394,73 @@ class Neuron(object):
         
         self.betas[0] = x[ind]
         self.betas[1] = y[ind]
-        self.betas[2] = 4
-        self.betas[3] = 4
-        self.betas[4] = 4
-        self.betas[5] = 4
-        self.betas[6] = np.nanmin(z0)
-        self.betas[7] = np.nanmax(z0) - np.nanmin(z0)
-        self.betas[8] = np.nanmin(z1)
-        self.betas[9] = np.nanmax(z1) - np.nanmin(z1)
-#        self.betas[0] = x[ind]
-#        self.betas[1] = y[ind]
-#        self.betas[2] = 4
-#        self.betas[3] = 4
-#        self.betas[4] = 4
-#        self.betas[5] = 4
-#        self.betas[6] = 0
-#        self.betas[7] = np.nanmean(z0)
-#        self.betas[8] = 0
-#        self.betas[9] = np.nanmean(z1)
+        self.betas[2] = 20
+        self.betas[3] = 20
+        self.betas[4] = np.nanmin(z0)
+        self.betas[5] = np.nanmax(z0) - np.nanmin(z0)
+        self.betas[6] = np.nanmin(z1)
+        self.betas[7] = np.nanmax(z1) - np.nanmin(z1)
         
     def error_func(self, betas0):
-        ''' error function of fitted 2d gaussian. 
+        ''' Error function of fitted 2d gaussian: returns sums of squares for
+        the current set of parameters. If parameters are out of bounds, 
+        returns 'np.inf'. 
         '''
+        if np.any(betas0 < self.lb) or np.any(betas0 > self.ub):
+            return np.inf
         x = np.ravel(self.x_grid)
         y = np.ravel(self.y_grid)
         z0 = np.ravel(self.frmean_space[0])
-        z1 = np.ravel(self.frmean_space[1])
-        
-        x_oob = betas0[0] < -40 or betas0[0] > 40
-        y_oob = betas0[1] < -40 or betas0[1] > 40
-        stdx_oob = betas0[2] < 0 or betas0[4] < 0
-        stdy_oob = betas0[3] < 0 or betas0[5] < 0
-        min_oob = betas0[6] < 0 or betas0[8] < 0
-        max_oob = betas0[7] > 400 or betas0[9] > 400
-        oob = x_oob or y_oob or stdx_oob or stdy_oob or min_oob or max_oob
-        if oob:
-            if self.fit_type == 'lsq':
-                return np.r_[np.full_like(z0, np.inf), np.full_like(z1, np.inf)]  
-            elif self.fit_type == 'basinhop':
-                return np.inf                
-        if self.fit_type == 'lsq':
-            return np.r_[z0 - self.get_gauss(x, y, 0, betas0), 
-                         z1 - self.get_gauss(x, y, 1, betas0)]
-        elif self.fit_type == 'basinhop':
-            return np.nansum(np.r_[z0 - neuron.get_gauss(x, y, 0, betas0), 
-                               z1 - neuron.get_gauss(x, y, 1, betas0)] ** 2)
+        z1 = np.ravel(self.frmean_space[1])        
+        return np.nansum(np.r_[z0 - self.get_gauss(x, y, 0, betas0), 
+                               z1 - self.get_gauss(x, y, 1, betas0)] ** 2)
 
-    def fit_gaussian(self):
-        print(self.fit_type)
-        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : START')
-        if self.fit_type == 'lsq':
-            self.betas, _ = sp.optimize.leastsq(self.error_func, self.betas)   
-        elif self.fit_type == 'basinhop':            
-            results = sp.optimize.basinhopping(self.error_func, self.betas, 
-                                               disp=True, 
-                                               callback=self.print_fun, 
-                                               take_step=self.take_step)  
-            self.betas = results.x
-        print('%.2f\t' * len(self.betas) %tuple(self.betas), ' : FINISH')
+    def fit_gaussian(self, niter=100, print_betas=True):
+        betas0 = copy.copy(self.betas)
+        results = sp.optimize.basinhopping(self.error_func, self.betas, 
+                                           disp=False, 
+                                           accept_test=self.eval_fit,
+                                           niter=niter)
+        self.betas = results.x
+        print('\tSTART\tFINISH')
+        for i in range(len(betas0)):
+            print('%s:\t%.2f\t%.2f' % (self.param_labels[i], 
+                                       betas0[i], self.betas[i]))
+        return results
     
-    def take_step(self, step):
-        step[0:2] += np.random.uniform(-10, 10, step[0:2].shape)
-        step[2:6] += np.random.uniform(-10, 10, step[2:6].shape)
-        step[6:] += np.random.uniform(-20, 20, step[6:].shape)
-        #print('%.2f\t' * len(step) %tuple(step))
-        return step
+    def take_step(self, x0):        
+        xy_inds = [('ux' in label) or ('uy' in label) for label in 
+                   self.param_labels]
+        std_inds = ['std' in label for label in self.param_labels]        
+        min_inds = ['minfr' in label for label in self.param_labels]
+        max_inds = ['maxfr' in label for label in self.param_labels]
+        x = copy.copy(x0)
+        x[np.where(xy_inds)] = np.random.uniform(-20, 20, np.sum(xy_inds))
+        x[np.where(std_inds)] = np.random.uniform(1, 80, np.sum(std_inds))
+        x[np.where(min_inds)] = np.random.uniform(1, 100, np.sum(min_inds))
+        x[np.where(max_inds)] = np.random.uniform(1, 100, np.sum(max_inds))
+        return x
         
     def print_fun(self, x, f, accepted):
-        if not np.isinf(f):
+        if not np.isinf(f) and accepted == 1:
+            #g_nr = self.get_gauss(self.x_plot_grid, self.y_plot_grid, 0, x)
+            #g_rw = self.get_gauss(self.x_plot_grid, self.y_plot_grid, 1, x)        
+            #self.plot_gaussian([g_nr, g_rw], self.frmean_space)
             print('%.2f\t' * len(x) %tuple(x))
             print('   f = %1.2f, accepted = %d' %(f, accepted))
+            
+    def eval_fit(self, f_new, x_new, f_old, x_old):
+        ''' Check that the parameters corresponding to this local mininium are
+        within in bounds. This called after each basinhopping iteration.
+        
+        -f_new, f_old: error for the current/last set of parameters, as defined 
+         'error_func' (sums of squares in this case)
+        -x_new, x_old: new parameters for this iteration, and old parameters
+         for the best fit so far
+        '''
+        accept = (np.all(x_new >= self.lb) and np.all(x_new <= self.ub) and
+                  f_new < f_old)
+        return bool(accept)
     
     def get_xy(self):
         ''' all possible x and y locations of the stimuli'''
@@ -682,23 +529,21 @@ class Neuron(object):
         plt.plot(t1, fr1)
         plt.show()
         
-    def psth_map(self, binSize=10, binShift=1):
+    def psth_map(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for each reward condition 
         (reward or no reward) and spatial location
         '''
-        if self.fr_smooth == None:
-                self.smooth_firing_rates(binSize, binShift)     
-        self.get_fr_by_loc()
-        ylim = self.get_ylim()
-        
+        ylim = self.get_ylim()        
         t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)
         fig, ax = plt.subplots(nrows=len(self.y), ncols=len(self.x))
         for xi in range(len(self.x)):
             for yi in range(len(self.y)):
                 #plot
                 plt.sca(ax[len(self.y) - yi - 1, xi])  
-                plt.plot(t, self.fr_space[0, :, xi, yi], color='r')
-                plt.plot(t, self.fr_space[1, :, xi, yi], color='b')            
+                plt.plot(t, self.fr_space[0, :, xi, yi], 
+                         color=self.rew_colors[0], lw=1)
+                plt.plot(t, self.fr_space[1, :, xi, yi], 
+                         color=self.rew_colors[1], lw=1)          
                 plt.plot((0,0), ylim, linestyle='--', color='0.5')
                 #format
                 plt.title('x=%1.1f, y=%1.1f' % (self.x[xi], self.y[yi]), size=6)
@@ -722,23 +567,47 @@ class Neuron(object):
                  ha='center', va='center', rotation='vertical')
         fig.tight_layout()
         
-        #plt.savefig(title + '_psth_map.eps', bbox_inches='tight')
-        plt.show()    
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()    
         
-    def psth_rew(self, binSize=10, binShift=1):
+    def psth_rew(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for cue predicted reward and
         no reward (irrespective of spatial location)
-        '''
-        if self.fr_smooth == None:
-            self.smooth_firing_rates(binSize, binShift)            
+        '''             
         t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)      
         fr0 = np.nanmean(self.fr_smooth[np.array(self.df['rew']==0),:], 0)
         fr1 = np.nanmean(self.fr_smooth[np.array(self.df['rew']==1),:], 0)
-        plt.plot(t, fr0, 'r')
-        plt.plot(t, fr1, 'b')
-        plt.show()   
         
-    def plot_hot_spot(self, min_pos, max_pos):
+        fig, ax = plt.subplots(nrows=2, ncols=1)
+        plt.sca(ax[0])
+        plt.plot(t, fr0, c=self.rew_colors[0])
+        plt.plot(t, fr1, c=self.rew_colors[1])
+        plt.ylabel('Firing rate (sp/s)')
+        
+        plt.sca(ax[1])
+        count = 1
+        for is_rew in range(2):
+            for i in np.where(self.df['rew']==is_rew)[0]:
+                spks = copy.copy(self.df.ix[i, 'spkdata'] - 
+                                 self.df.ix[i, 't_CUE_ON'])
+                spks = spks[(spks >= self.tFrame[0]) & (spks <= self.tFrame[1])]                
+                plt.scatter(spks, [count]*len(spks), c=self.rew_colors[is_rew],
+                            marker='|', linewidth=0.1)
+                count += 1
+        plt.xlim(self.tFrame)
+        plt.ylim((0, count))
+        plt.xlabel('Time relative to cue onset (s)')
+        plt.ylabel('Trial #')
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()   
+        
+    def plot_hot_spot(self, min_pos, max_pos, pdf=None):
         ''' plot mean firing rates on the grid of locations and indicate the
         corresponding preferred and non-preferred regions as determined by
         'define_hot_spot
@@ -747,8 +616,8 @@ class Neuron(object):
         plt.suptitle(self.filename + '_' + self.name, size=8)
         for irew in range(2):
             plt.sca(ax[irew])
-            zmax = np.nanmax(neuron.frmean_space[irew,:,:])
-            zmin = np.nanmin(neuron.frmean_space[irew,:,:])
+            zmax = np.nanmax(self.frmean_space[irew,:,:])
+            zmin = np.nanmin(self.frmean_space[irew,:,:])
             size = 50 * (self.frmean_space[irew,:,:] - zmin) / (zmax - zmin)                 
             plt.scatter(np.ravel(self.x_grid), np.ravel(self.y_grid), 
                         s=np.ravel(size), c=self.rew_colors[irew])
@@ -772,9 +641,13 @@ class Neuron(object):
             plt.xlabel('x (deg)')
             plt.ylabel('y (deg)') 
         fig.tight_layout()
-        plt.show() 
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show() 
         
-    def plot_gaussian(self, g, z):
+    def plot_gaussian(self, g, z, pdf=None):
         
         '''plot gaussian colormap with overlaid scatter of firing rates
            x, y are MxN array (typically denser than observed data points)
@@ -782,8 +655,7 @@ class Neuron(object):
            z is actual firing rates
         '''
         fig, ax = plt.subplots(nrows=1, ncols=np.size(g,0))
-        plt.suptitle(neuron.filename + '_' + neuron.name, size=8)
-        
+        plt.suptitle(self.filename + '_' + self.name, size=8)        
         for k in range(np.size(g,0)):
             
             #colormap
@@ -796,7 +668,7 @@ class Neuron(object):
             plt.xlabel('x (deg)')
             if k == 0:
                 plt.ylabel('y (deg)')                    
-            ax[k].invert_yaxis()
+            ax[k].invert_yaxis()            
     
             #scatter
             x_scatter = (np.ravel(self.x_grid) + self.xy_max) * self.plot_density
@@ -810,12 +682,12 @@ class Neuron(object):
             plt.colorbar(im, cax=cax)
             plt.tick_params(labelsize=8)          
     
-        fig.tight_layout()
-        fig_dir = '/Users/cjpeck/Dropbox/Matlab/custom offline/' + \
-                  'mapping_py/mapping/figs/'
-        plt.savefig(fig_dir + neuron.filename + '_' + neuron.name + '_' + 
-                    self.fit_type + '.pdf', bbox_inches='tight')
-        plt.show()
+        fig.tight_layout()    
+        if pdf:
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()
         
     ### ANALYSIS FUNCTIONS
     def define_hot_spot(self):
@@ -858,197 +730,14 @@ class Neuron(object):
                                     min_pos[irew] = (ix0, ix1, iy0, iy1)
                                     
         if min_pos[0] == None or min_pos[1] == None:
-            pdb.set_trace()
+            ipdb.set_trace()
         return min_pos, max_pos
                                                                           
     ### I/O
         
     def save_neuron(self):    
         ''' Create a pickle of the neuron object '''
-        directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
         fname = self.filename + '_' + self.name
-        print('saving:', directory + fname)
-        with open(directory + fname + '.pickle', 'wb') as f:        
+        print('saving:', self.directory + fname)
+        with open(self.directory + fname + '.pickle', 'wb') as f:        
             pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
-
-
-class LoadData(object):
-            
-    def __init__(self):
-        self.directory = '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping_py/mapping/data/'
-        with open(self.directory + 'mapping_exp.pickle', 'rb') as f:
-            self.experiment = pickle.load(f)            
-    
-    def load_session(self, fname):     
-        
-        while not fname in self.experiment.files:
-            tmp_list = []
-            for i, key in enumerate(self.experiment.files):
-                print(i, key)
-                tmp_list.append(key)
-            ind = input('Which session?:  ')
-            fname = tmp_list[int(ind)]           
-        
-        with open(self.directory + fname + '.pickle', 'rb') as f:
-            session = pickle.load(f)
-        return session
-        
-    def load_neuron(self, filename, cellname):       
-        
-        while not filename in self.experiment.files:
-            tmp_list = []
-            for i, key in enumerate(self.experiment.files):
-                print(i, key)
-                tmp_list.append(key)
-            ind = input('Which session?:  ')
-            filename = tmp_list[int(ind)]   
-            
-        while not cellname in self.experiment.files[filename]:
-            tmp_list = []
-            for i, key in enumerate(self.experiment.files[filename]):
-                print(i, key)
-                tmp_list.append(key)
-            ind = input('Which neuron?:  ')
-            cellname = tmp_list[int(ind)]   
-                
-        fname = filename + '_' + cellname
-        with open(self.directory + fname + '.pickle', 'rb') as f:
-            neuron = pickle.load(f)
-        return neuron
-        
-
-
-
-if __name__ == '__main__':
-    
-    # initialize Experiment, and load information    
-    finfo = sp.io.loadmat(
-        '/Users/cjpeck/Dropbox/Matlab/custom offline/mapping/files/' + 
-        'map_cell_list.mat', squeeze_me=True)
-        
-    # changed to zero based inds
-    finfo['cell_ind'] -= 1
-    finfo['file_ind'] -= 1        
-
-    # test data
-    directory = '/Users/cjpeck/Documents/Matlab/Blackrock/Data/MAP_PY/'        
-    for i in range(len(finfo['filenames'])):
-        f = sp.io.loadmat(directory + finfo['filenames'][i] + '.nex.mat', 
-                          squeeze_me=True, struct_as_record=True)
-        cells = finfo['cell_name'][finfo['file_ind'] == i]  
-        #session = Session(f, finfo['filenames'][i], cells, True)
-        for cell in cells:                      
-            neuron = Neuron(f, finfo['filenames'][i], cell)
-        
-            neuron.get_xy()
-            neuron.get_xy_grid()
-            neuron.get_xy_plot_grid()    
-            neuron.get_frmean_by_loc((.1,.5))
-            
-            min_pos, max_pos = neuron.define_hot_spot()
-            neuron.plot_hot_spot(min_pos, max_pos)                
-    
-            #compare basinhop vs. lsq        
-            neuron.fit_type = 'lsq'
-            neuron.get_initial_params()
-            neuron.fit_gaussian()
-            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, neuron.betas)
-            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
-            
-            neuron.fit_type = 'basinhop'
-            neuron.get_initial_params()
-            neuron.fit_gaussian()
-            g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0, neuron.betas)
-            g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1, neuron.betas)        
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
-            break
-        break
-    error = neuron.error_func(neuron.betas)
-    
-    
-    #option for constraining STD estimates
-
-
-#    io = LoadData()
-#    for file in io.experiment.files:
-#        for cell in io.experiment.files[file]:
-#            neuron = io.load_neuron(file, cell)
-#            neuron.psth_map()    
-#            min_pos, max_pos = neuron.define_hot_spot((.1, .5))
-#            neuron.plot_hot_spot(min_pos, max_pos)    
-#            break
-#        break            
-    
-    # test smooth firing rates procedure    
-#    neuron.smooth_firing_rates(10, 1)    
-#    t0 = np.mean(np.c_[neuron.tStart, neuron.tEnd],1)
-#    t1 = np.mean(np.c_[neuron.tStart_smooth, neuron.tEnd_smooth],1)
-#    fr0 = np.nanmean(neuron.fr, 0)
-#    fr1 = np.nanmean(neuron.fr_smooth, 0)
-#    plt.figure()
-#    plt.plot(t0, fr0)
-#    plt.plot(t1, fr1)
-#    plt.show()
-                          
-#    # add neuron by file  
-#    overwrite = True
-#    exp = Experiment(overwrite)
-#    for iFile, file in enumerate(finfo['filenames']):
-#        # load file
-#        f = sp.io.loadmat(directory + file + '.nex.mat', squeeze_me=True)
-#        print('Loaded file', file)
-#        cells = finfo['cell_name'][finfo['file_ind'] == iFile]             
-#        exp.add_session(f, file, cells)        
-#    exp.save_experiment()              
-        
-#    # a test
-#    n = Neuron(f, file, cells[0])
-#    for iTrial in range(60):
-#        if iTrial in n.df.index:
-#            print(iTrial, len(n.df['spkdata'].loc[iTrial]), 'spikes')
-#        else:
-#            print(iTrial, 'not in DataFrame')
-
-#    # Query time
-#    s = set()
-#    l = []
-#    a = np.full(np.shape(finfo['cell_name']), 'nan', dtype=object)
-#    for i, name in enumerate(finfo['cell_name']):
-#        fname = finfo['filenames'][finfo['file_ind'][i]] + '_' + name
-#        s.add(fname)
-#        l.append(fname)
-#        a[i] = fname
-#    
-#    tests = ['tn_map_120314_elec1U', 'tn_map_120914_elec21U', 'tn_map_123014_elec31b']
-#    t_set = [0]*len(tests)
-#    t_list = [0]*len(tests)
-#    t_array = [0]*len(tests)
-#    for t in range(len(tests)):
-#        start = time.time()
-#        tests[t] in s
-#        t_set[t] = time.time() - start
-#        start = time.time()
-#        tests[t] in l
-#        t_list[t] = time.time() - start
-#        start = time.time()
-#        tests[t] in a
-#        t_array[t] = time.time() - start
-#    print('set:', t_set)
-#    print('list:', t_list)
-#    print('array:', t_array)
-    
-#    io = LoadData()
-#    fsession0 = io.load_session('tn_map_123014')
-#    print(fsession0.filename)
-#    fsession = io.load_session('asdf')
-#    print(fsession.filename)
-#    fneuron0 = io.load_neuron('tn_map_123014', 'elec1U')
-#    print(fneuron0.filename, fneuron0.name)
-#    fneuron = io.load_neuron('aasdf', 'asdf')
-#    print(fneuron.filename, fneuron.name)
-    
-    
-    
-    
-        
