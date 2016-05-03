@@ -210,7 +210,11 @@ class BehavioralAnalyses(object):
         title = 'Reaction time: p=%1.4f' %(p)
         self.plot_performance(neu_mean, rew_mean, title=title, labels=['Neutral', 'Reward'], c=['r', 'b'])
     
-    def plot_performance(self, title, labels, c,  *args):
+    def plot_performance(self, *args, **kwargs):
+        title = kwargs['title']
+        labels = kwargs['labels']
+        c = kwargs['c']
+
         plt.figure()
         n = len(args)
         x = np.arange(n) + 0.5
@@ -342,11 +346,11 @@ class BehavioralAnalyses(object):
                         np.ones_like(y0b), np.ones_like(y1b))) 
         return y, x1, x2
         
-    def df_for_statsmodel(self, labels, *args):
+    def df_for_statsmodel(self, *args, **kwargs):
         out = args[0]
         for arg in args[1:]:
             out = np.vstack((out, arg))
-        return pd.DataFrame(np.transpose(out), columns=labels)
+        return pd.DataFrame(np.transpose(out), columns=kwargs['labels'])
             
             
 def print_and_write(f, line):
@@ -356,8 +360,8 @@ def print_and_write(f, line):
     else:
         f.writelines(line)
 
-def figs_and_text():
-    with open(ba.dir_figs + 'figs/behavioral_results.txt', 'w') as f:        
+def figs_and_text(ba):
+    with open(ba.dir_figs + 'behavioral_results.txt', 'w') as f:        
         ba.plot_licking()        
         print_and_write(f, '\n**** LICKING: ACROSS MONKEY\n')
         print_and_write(f, ba.licking_across_monkey())        
