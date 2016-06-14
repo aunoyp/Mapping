@@ -1,6 +1,11 @@
-matplotlib
-numpy
-pandas
-scipy
-statsmodels
-sklearn
+conda create -n mapping python=3
+source activate mapping
+
+conda install -y ipython
+conda install -y jupyter
+conda install -y matplotlib
+conda install -y numpy
+conda install -y pandas
+conda install -y scipy
+conda install -y statsmodels
+conda install -y scikit-learn

@@ -422,10 +422,10 @@ class Neuron(object):
                                            accept_test=self.eval_fit,
                                            niter=niter)
         self.betas = results.x
-        print('\tSTART\tFINISH')
-        for i in range(len(betas0)):
-            print('%s:\t%.2f\t%.2f' % (self.param_labels[i], 
-                                       betas0[i], self.betas[i]))
+        # print('\tSTART\tFINISH')
+        # for i in range(len(betas0)):
+        #     print('%s:\t%.2f\t%.2f' % (self.param_labels[i], 
+        #                                betas0[i], self.betas[i]))
         return results
     
     def take_step(self, x0):        
