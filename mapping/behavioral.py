@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import itertools
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
@@ -15,6 +16,32 @@ from statsmodels.formula.api import ols
 #prop = font_manager.FontProperties(fname=fontpath)
 #matplotlib.rcParams['font.family'] = prop.get_name()
 #matplotlib.rcParams['pdf.fonttype'] = 42
+
+def anova(df, max_interactions=None):
+    # formula = '{} ~ C({}) + C({}) + C({}) + C({}):C({}) + C({}):C({}) + C({}):C({}) + C({}):C({}):C({})'.format(
+    #     *(cols + cols[1:3] + [cols[1]] + [cols[3]] + cols[2:] + cols[1:])
+    # )
+
+    cols = list(df.columns)
+    if not max_interactions:
+        max_interactions = df.shape[1] - 1
+    formula = '{} ~ '.format(cols[0])
+    cols.pop(0)
+
+    for choose in range(max_interactions):
+        combs = itertools.combinations(cols, choose + 1)
+        for comb in combs:
+            for i, col in enumerate(comb):
+                if i == 0:
+                    formula += 'C({})'.format(col)
+                else:
+                    formula += ':C({})'.format(col)
+                if (i == len(comb)-1):
+                    formula += ' + '
+    formula = formula[:-3]
+
+    lm = ols(formula, df).fit()
+    return sm.stats.anova_lm(lm)
 
 
 class Behavior(object):
@@ -204,7 +231,8 @@ class BehavioralAnalyses(object):
                                                neu_cntr_mean, rew_cntr_mean)
         x_monkey = np.tile(self.dat.monkey, 4)
         df = self.df_for_statsmodel(y, x_rew, x_dir, x_monkey, labels=['licking', 'rew', 'dir', 'monkey'])
-        return self.anova_3way(df)
+        # return self.anova_3way(df)
+        return anova(df, max_interactions=None)
 
     ### PERFORMANCE PLOTTING
     def plot_hr(self):
