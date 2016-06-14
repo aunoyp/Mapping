@@ -50,8 +50,8 @@ class Behavior(object):
     population-level behavioral analyses
     '''
     def __init__(self, tFrame=[-500, 500]):
-        self.directory = '/Users/syi115/GitHub/MappingData/'
-        self.save_dir = '/Users/syi115/GitHub/MappingData/'
+        self.directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')
+        self.save_dir =  os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')
         io = LoadData()
         self.files = np.array(list(io.experiment.files.keys()))
         self.nfiles = len(self.files)
