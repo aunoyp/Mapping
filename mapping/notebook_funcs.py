@@ -1,4 +1,5 @@
 
+import pandas as pd
 
 def print_anova(res, title):
     p_rew = res.ix['C(rew)', 'PR(>F)']
@@ -8,7 +9,7 @@ def print_anova(res, title):
     print('*** 2-way anova on %s' %title)
     print('reward %1.4f, monkey %1.4f, interaction %1.4f' %(p_rew, p_monkey, p_int))
 
-def print_wilcoxons(p_monkey, p_dir, p_set, title):
+def print_wilcoxons(ba, p_monkey, p_dir, p_set, title):
     if title == 'Hit Rate':
         p_monkey = ba.hr_per_monkey()
         p_dir = ba.hr_per_dir()

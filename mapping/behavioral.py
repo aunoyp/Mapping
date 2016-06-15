@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import itertools
+from mapping.experiment import LoadData, Experiment
+from mapping.session import Session
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
@@ -18,9 +20,11 @@ from statsmodels.formula.api import ols
 #matplotlib.rcParams['pdf.fonttype'] = 42
 
 def anova(df, max_interactions=None):
-    # formula = '{} ~ C({}) + C({}) + C({}) + C({}):C({}) + C({}):C({}) + C({}):C({}) + C({}):C({}):C({})'.format(
-    #     *(cols + cols[1:3] + [cols[1]] + [cols[3]] + cols[2:] + cols[1:])
-    # )
+    """
+    Generalized ANOVA functions.
+
+    Assumed 0th column of dataframe is the target.
+    """
 
     cols = list(df.columns)
     if not max_interactions:
@@ -70,6 +74,11 @@ class Behavior(object):
         self.rt_rew = np.empty((self.nfiles, 2))
         self.rt_rew_dir = np.empty((self.nfiles, 2, 2))
         self.rt_rew_set = np.empty((self.nfiles, 2, 2))
+
+        self.lick_rew_set_dir = np.empty((self.nfiles, self.nt, 2, 2, 2))
+        self.hr_rew_set_dir = np.empty((self.nfiles, self.nt, 2, 2, 2))
+        self.rt_rew_set_dir = np.empty((self.nfiles, self.nt, 2, 2, 2))
+
         for iFile, file in enumerate(self.files):
 
             with open(self.directory + file + '.pickle', 'rb') as f:
@@ -104,6 +113,13 @@ class Behavior(object):
                     inds = np.logical_and(np.logical_and(isRew == irew, cue_set == iset),
                                           ~np.isnan(rewOn))
                     self.lick_rew_set[iFile, :, irew, iset] = self.align_licks(dat.laser, inds, rewOn)
+            # licking split by reward, direction, cue set
+            for irew in range(2):
+                for iset in range(2):
+                    for idir in range(2):
+                        inds = np.logical_and(np.logical_and(isRew == irew, cue_set == iset, cue_dir == idir),
+                                              ~np.isnan(rewOn))
+                        self.lick_rew_set_dir[iFile, :, irew, iset, idir] = self.align_licks(dat.laser, inds, rewOn)
 
             # hit rate by reward
             for irew in range(2):
@@ -121,6 +137,13 @@ class Behavior(object):
                     hits = dat.df.ix[(isRew == irew) & (cue_set == iset) &
                                      (dat.df['hit'] | dat.df['miss']), 'hit']
                     self.hr_rew_set[iFile, irew, iset] = hits.sum() / len(hits)
+            # hit rate by reward, cue set, dir
+            for irew in range(2):
+                for iset in range(2):
+                    for idir in range(2):
+                        hits = dat.df.ix[(isRew == irew) & (cue_set == iset) & (cue_dir == idir) &
+                                         (dat.df['hit'] | dat.df['miss']), 'hit']
+                        self.hr_rew_set_dir[iFile, irew, iset, idir] = hits.sum() / len(hits)
 
             # reaction time by reward
             for irew in range(2):
@@ -138,7 +161,13 @@ class Behavior(object):
                     rt = dat.df.ix[(isRew == irew) & (cue_set == iset) &
                                     dat.df['hit'], 'rt']
                     self.rt_rew_set[iFile, irew, iset] = rt.mean(skipna=True)
-
+            # reaction time by reward, cue set, dir
+            for irew in range(2):
+                for iset in range(2):
+                    for idir in range(2):
+                        rt = dat.df.ix[(isRew == irew) & (cue_set == iset) & (cue_dir == idir) &
+                                        dat.df['hit'], 'rt']
+                        self.rt_rew_set_dir[iFile, irew, iset, idir] = rt.mean(skipna=True)
 
     def align_licks(self, laser, inds, etimes):
         licks = [laser[i] for i in range(len(laser)) if inds[i]]
@@ -161,13 +190,13 @@ class Behavior(object):
 
 class BehavioralAnalyses(object):
 
-    def __init__(self):
+    def __init__(self,  tFrameMean=[-250, 0]):
         self.dir_data = '../MappingData/'
         self.dir_figs = 'figs/'
         self.monkeys = ['Tom', 'Spaghetti']
         self.directions = ['Ipsi.', 'Contra.']
         self.cuesets = ['Cue set 0', 'Cue set 1']
-        self.tFrameMean = [-250, 0]
+        self.tFrameMean = tFrameMean
         fname = 'behavioral_data'
         with open(self.dir_data + fname + '.pickle', 'rb') as f:
             self.dat = pickle.load(f)
@@ -222,17 +251,73 @@ class BehavioralAnalyses(object):
         df = self.df_for_statsmodel(y, x1, x2, labels=['licking', 'rew', 'dir'])
         return self.anova_2way(df)
 
-    def licking_anova(self):
-        neu_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,0,0])
-        rew_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,1,0])
-        neu_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,0,1])
-        rew_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,1,1])
-        y, x_rew, x_dir = self.arrays_for_anova_2way(neu_ipsi_mean, rew_ipsi_mean,
-                                               neu_cntr_mean, rew_cntr_mean)
-        x_monkey = np.tile(self.dat.monkey, 4)
-        df = self.df_for_statsmodel(y, x_rew, x_dir, x_monkey, labels=['licking', 'rew', 'dir', 'monkey'])
-        # return self.anova_3way(df)
-        return anova(df, max_interactions=None)
+    def licking_anova(self, max_interactions=None):
+        """
+        Do ANOVA on licking over all dimensions of the task.
+
+        Features:
+            - Reward
+            - Cue set
+            - Cue direction
+            - Monkey
+
+        Target:
+            - Proportion time spent licking
+        """
+        neu_set0_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,0,0,0])
+        rew_set0_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,1,0,0])
+        neu_set0_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,0,0,1])
+        rew_set0_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,1,0,1])
+        neu_set1_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,0,1,0])
+        rew_set1_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,1,1,0])
+        neu_set1_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,0,1,1])
+        rew_set1_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_set_dir[:,:,1,1,1])
+
+        y = np.hstack((
+            neu_set0_ipsi_mean,
+            rew_set0_ipsi_mean,
+            neu_set0_cntr_mean,
+            rew_set0_cntr_mean,
+            neu_set1_ipsi_mean,
+            rew_set1_ipsi_mean,
+            neu_set1_cntr_mean,
+            rew_set1_cntr_mean
+        ))
+        x_rew = np.hstack((
+            np.zeros_like(neu_set0_ipsi_mean),
+            np.ones_like(rew_set0_ipsi_mean),
+            np.zeros_like(neu_set0_cntr_mean),
+            np.ones_like(rew_set0_cntr_mean),
+            np.zeros_like(neu_set1_ipsi_mean),
+            np.ones_like(rew_set1_ipsi_mean),
+            np.zeros_like(neu_set1_cntr_mean),
+            np.ones_like(rew_set1_cntr_mean)
+        ))
+        x_set = np.hstack((
+            np.zeros_like(neu_set0_ipsi_mean),
+            np.zeros_like(rew_set0_ipsi_mean),
+            np.zeros_like(neu_set0_cntr_mean),
+            np.zeros_like(rew_set0_cntr_mean),
+            np.ones_like(neu_set1_ipsi_mean),
+            np.ones_like(rew_set1_ipsi_mean),
+            np.ones_like(neu_set1_cntr_mean),
+            np.ones_like(rew_set1_cntr_mean)
+        ))
+        x_dir = np.hstack((
+            np.zeros_like(neu_set0_ipsi_mean),
+            np.zeros_like(rew_set0_ipsi_mean),
+            np.ones_like(neu_set0_cntr_mean),
+            np.ones_like(rew_set0_cntr_mean),
+            np.zeros_like(neu_set1_ipsi_mean),
+            np.zeros_like(rew_set1_ipsi_mean),
+            np.ones_like(neu_set1_cntr_mean),
+            np.ones_like(rew_set1_cntr_mean)
+        ))
+
+        x_monkey = np.tile(self.dat.monkey, 8)
+        df = self.df_for_statsmodel(y, x_rew, x_set, x_dir, x_monkey,
+            labels=['licking', 'rew', 'set', 'dir', 'monkey'])
+        return anova(df, max_interactions=max_interactions)
 
     ### PERFORMANCE PLOTTING
     def plot_hr(self):
@@ -441,9 +526,9 @@ def figs_and_text(ba):
 
 if __name__ == '__main__':
 
-    #b = Behavior()
-    #b.extract_data()
-    #b.save_behavior()
+    # b = Behavior()
+    # b.extract_data()
+    # b.save_behavior()
 
     ba = BehavioralAnalyses()
     # ba.plot_licking()
