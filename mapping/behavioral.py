@@ -13,40 +13,6 @@ import scipy as sp
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
 
-#import matplotlib.font_manager as font_manager
-#fontpath = '/Users/cjpeck/anaconda/lib/python3.4/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
-#prop = font_manager.FontProperties(fname=fontpath)
-#matplotlib.rcParams['font.family'] = prop.get_name()
-#matplotlib.rcParams['pdf.fonttype'] = 42
-
-def anova(df, max_interactions=None):
-    """
-    Generalized ANOVA functions.
-
-    Assumed 0th column of dataframe is the target.
-    """
-
-    cols = list(df.columns)
-    if not max_interactions:
-        max_interactions = df.shape[1] - 1
-    formula = '{} ~ '.format(cols[0])
-    cols.pop(0)
-
-    for choose in range(max_interactions):
-        combs = itertools.combinations(cols, choose + 1)
-        for comb in combs:
-            for i, col in enumerate(comb):
-                if i == 0:
-                    formula += 'C({})'.format(col)
-                else:
-                    formula += ':C({})'.format(col)
-                if (i == len(comb)-1):
-                    formula += ' + '
-    formula = formula[:-3]
-
-    lm = ols(formula, df).fit()
-    return sm.stats.anova_lm(lm)
-
 
 class Behavior(object):
     ''' Behavior object:
@@ -214,26 +180,6 @@ class BehavioralAnalyses(object):
         ax.set_title(title)
         ax.set_xlim([x/1000 for x in self.dat.tFrame])
         ax.plot([0,0], plt.ylim(), c='k', linestyle='--')
-
-    ### LICKING WRAPPERS
-    # def licking_across_monkey(self):
-    #     neu_mean = self.get_mean_across_t(self.dat.lick_rew[:,:,0])
-    #     rew_mean = self.get_mean_across_t(self.dat.lick_rew[:,:,1])
-    #     y = np.hstack((neu_mean, rew_mean))
-    #     x1 = np.hstack((np.zeros_like(neu_mean), np.ones_like(rew_mean)))
-    #     x2 = np.tile(self.dat.monkey, 2)
-    #     df = self.df_for_statsmodel(y, x1, x2, labels=['licking', 'rew', 'monkey'])
-    #     return self.anova_2way(df)
-
-    # def licking_across_dir(self):
-    #     neu_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,0,0])
-    #     rew_ipsi_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,1,0])
-    #     neu_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,0,1])
-    #     rew_cntr_mean = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,1,1])
-    #     y, x1, x2 = self.arrays_for_anova_2way(neu_ipsi_mean, rew_ipsi_mean,
-    #                                            neu_cntr_mean, rew_cntr_mean)
-    #     df = self.df_for_statsmodel(y, x1, x2, labels=['licking', 'rew', 'dir'])
-    #     return self.anova_2way(df)
 
     ### ANOVAS
     def _behavior_anova(self, data):
@@ -408,41 +354,52 @@ class BehavioralAnalyses(object):
         plt.savefig(self.dir_figs + dtype + '.pdf')
         plt.show()
 
-    ### 2-ways ANOVAs to look at other effects
-    def hr_across_monkey(self):
-        return self.perf_across_monkey(self.dat.hr_rew[:,0], self.dat.hr_rew[:,1], 'HR')
+    ### WILCOXONS
+    # licking
+    def licking_wilcoxon(self):
+        p, sign = [], []
+        x0 = self.get_mean_across_t(self.dat.lick_rew[:,:,0])
+        x1 = self.get_mean_across_t(self.dat.lick_rew[:,:,1])
+        p.append(self.wilcoxon(x0, x1))
+        sign.append(np.sign(np.mean(x1) - np.mean(x0)))
+        return pd.DataFrame([p, sign], columns=['all'], index=['P', 'sign'])
 
-    def rt_across_monkey(self):
-        return self.perf_across_monkey(self.dat.rt_rew[:,0], self.dat.rt_rew[:,1], 'RT')
+    def licking_per_monkey(self):
+        p, sign = [], []
+        for imonk in range(2):
+            x0 = self.get_mean_across_t(self.dat.lick_rew[self.dat.monkey==imonk,:,0])
+            x1 = self.get_mean_across_t(self.dat.lick_rew[self.dat.monkey==imonk,:,1])
+            p.append(self.wilcoxon(x0, x1))
+            sign.append(np.sign(np.mean(x1) - np.mean(x0)))
+        return pd.DataFrame([p, sign], columns=self.monkeys, index=['P', 'sign'])
 
-    def perf_across_monkey(self, y0, y1, ylabel):
-        y = np.hstack((y0, y1))
-        x1 = np.hstack((np.zeros_like(y0), np.ones_like(y1)))
-        x2 = np.tile(self.dat.monkey, 2)
-        df = self.df_for_statsmodel(y, x1, x2, labels=[ylabel, 'rew', 'monkey'])
-        return self.anova_2way(df)
+    def licking_per_dir(self):
+        p, sign = [], []
+        for idir in range(2):
+            x0 = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,0,idir])
+            x1 = self.get_mean_across_t(self.dat.lick_rew_dir[:,:,1,idir])
+            p.append(self.wilcoxon(x0, x1))
+            sign.append(np.sign(np.mean(x1) - np.mean(x0)))
+        return pd.DataFrame([p, sign], columns=self.directions, index=['P', 'sign'])
 
-    def hr_across_dir(self):
-        neu_ipsi_mean = self.dat.hr_rew_dir[:,0,0]
-        rew_ipsi_mean = self.dat.hr_rew_dir[:,1,0]
-        neu_cntr_mean = self.dat.hr_rew_dir[:,0,1]
-        rew_cntr_mean = self.dat.hr_rew_dir[:,1,1]
-        y, x1, x2 = self.arrays_for_anova_2way(neu_ipsi_mean, rew_ipsi_mean,
-                                               neu_cntr_mean, rew_cntr_mean)
-        df = self.df_for_statsmodel(y, x1, x2, labels=['HR', 'rew', 'dir'])
-        return self.anova_2way(df)
+    def licking_per_set(self):
+        p, sign = [], []
+        for iset in range(2):
+            x0 = self.get_mean_across_t(self.dat.lick_rew_set[:,:,0,iset])
+            x1 = self.get_mean_across_t(self.dat.lick_rew_set[:,:,1,iset])
+            p.append(self.wilcoxon(x0, x1))
+            sign.append(np.sign(np.mean(x1) - np.mean(x0)))
+        return pd.DataFrame([p, sign], columns=self.cuesets, index=['P', 'sign'])
 
-    def rt_across_dir(self):
-        neu_ipsi_mean = self.dat.rt_rew_dir[:,0,0]
-        rew_ipsi_mean = self.dat.rt_rew_dir[:,1,0]
-        neu_cntr_mean = self.dat.rt_rew_dir[:,0,1]
-        rew_cntr_mean = self.dat.rt_rew_dir[:,1,1]
-        y, x1, x2 = self.arrays_for_anova_2way(neu_ipsi_mean, rew_ipsi_mean,
-                                               neu_cntr_mean, rew_cntr_mean)
-        df = self.df_for_statsmodel(y, x1, x2, labels=['RT', 'rew', 'dir'])
-        return self.anova_2way(df)
+    # hit rate
+    def hr_wilcoxon(self):
+        p, sign = [], []
+        x0 = self.dat.hr_rew[:,0]
+        x1 = self.dat.hr_rew[:,1]
+        p.append(self.wilcoxon(x0, x1))
+        sign.append(np.sign(np.mean(x1) - np.mean(x0)))
+        return pd.DataFrame([p, sign], columns=['all'], index=['P', 'sign'])
 
-    ### wilcoxon to verify reward effect in each condtion
     def hr_per_monkey(self):
         p, sign = [], []
         for imonk in range(2):
@@ -469,6 +426,15 @@ class BehavioralAnalyses(object):
             p.append(self.wilcoxon(x0, x1))
             sign.append(np.sign(np.mean(x1) - np.mean(x0)))
         return pd.DataFrame([p, sign], columns=self.cuesets, index=['P', 'sign'])
+
+    # reaction time
+    def rt_wilcoxon(self):
+        p, sign = [], []
+        x0 = self.dat.rt_rew[:,0]
+        x1 = self.dat.rt_rew[:,1]
+        p.append(self.wilcoxon(x0, x1))
+        sign.append(np.sign(np.mean(x1) - np.mean(x0)))
+        return pd.DataFrame([p, sign], columns=['all'], index=['P', 'sign'])
 
     def rt_per_monkey(self):
         p, sign = [], []
@@ -499,23 +465,14 @@ class BehavioralAnalyses(object):
 
     ### STATS
     def wilcoxon(self, x0, x1):
+        """
+        Wilcoxon test to use.
+
+        sp.stats.wilcoxon: paired data
+        sp.stats.mannwhitneyu: 2-sample (unpaired data)
+        """
         _, p = sp.stats.wilcoxon(x0, x1)
         return p
-
-    def anova_2way(self, df):
-        formula = '%s ~ C(%s) + C(%s) + C(%s):C(%s)' %(
-            df.keys()[0], df.keys()[1], df.keys()[2], df.keys()[1], df.keys()[2]
-        )
-        lm = ols(formula, df).fit()
-        return sm.stats.anova_lm(lm)
-
-    def anova_3way(self, df):
-        cols = list(df.columns)
-        formula = '{} ~ C({}) + C({}) + C({}) + C({}):C({}) + C({}):C({}) + C({}):C({}) + C({}):C({}):C({})'.format(
-            *(cols + cols[1:3] + [cols[1]] + [cols[3]] + cols[2:] + cols[1:])
-        )
-        lm = ols(formula, df).fit()
-        return sm.stats.anova_lm(lm)
 
     ### AUXILLARY
     def get_mean_across_t(self, x):
@@ -524,20 +481,35 @@ class BehavioralAnalyses(object):
                                 t_all <= self.tFrameMean[1])
         return np.mean(x[:,t_mean], axis=1)
 
-    def arrays_for_anova_2way(self, y0a, y1a, y0b, y1b):
-        y = np.hstack((y0a, y1a, y0b, y1b))
-        x1 = np.hstack((np.zeros_like(y0a), np.ones_like(y1a),
-                        np.zeros_like(y0b), np.ones_like(y1b)))
-        x2 = np.hstack((np.zeros_like(y0a), np.zeros_like(y1a),
-                        np.ones_like(y0b), np.ones_like(y1b)))
-        return y, x1, x2
 
-    def df_for_statsmodel(self, *args, **kwargs):
-        out = args[0]
-        for arg in args[1:]:
-            out = np.vstack((out, arg))
-        return pd.DataFrame(np.transpose(out), columns=kwargs['labels'])
 
+def anova(df, max_interactions=None):
+    """
+    Generalized ANOVA functions.
+
+    Assumed 0th column of dataframe is the target.
+    """
+
+    cols = list(df.columns)
+    if not max_interactions:
+        max_interactions = df.shape[1] - 1
+    formula = '{} ~ '.format(cols[0])
+    cols.pop(0)
+
+    for choose in range(max_interactions):
+        combs = itertools.combinations(cols, choose + 1)
+        for comb in combs:
+            for i, col in enumerate(comb):
+                if i == 0:
+                    formula += 'C({})'.format(col)
+                else:
+                    formula += ':C({})'.format(col)
+                if (i == len(comb)-1):
+                    formula += ' + '
+    formula = formula[:-3]
+
+    lm = ols(formula, df).fit()
+    return sm.stats.anova_lm(lm)
 
 def print_and_write(f, line):
     print(line)

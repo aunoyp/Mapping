@@ -9,19 +9,10 @@ def print_anova(res, title):
     print('*** 2-way anova on %s' %title)
     print('reward %1.4f, monkey %1.4f, interaction %1.4f' %(p_rew, p_monkey, p_int))
 
-def print_wilcoxons(ba, p_monkey, p_dir, p_set, title):
-    if title == 'Hit Rate':
-        p_monkey = ba.hr_per_monkey()
-        p_dir = ba.hr_per_dir()
-        p_set = ba.hr_per_set()
-    elif title == 'Reaction Time':
-        p_monkey = ba.rt_per_monkey()
-        p_dir = ba.rt_per_dir()
-        p_set = ba.rt_per_set()
-    else:
-        raise Exception
+def print_wilcoxons(ba, p, p_monkey, p_dir, p_set, title):
 
     p_all = pd.concat([
+        p.iloc[0],
         p_monkey.iloc[0],
         p_dir.iloc[0],
         p_set.iloc[0]
