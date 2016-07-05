@@ -606,6 +606,7 @@ class Neuron(object):
             plt.close()
         else:
             plt.show()
+        return fig
 
     def plot_hot_spot(self, min_pos, max_pos, pdf=None):
         ''' plot mean firing rates on the grid of locations and indicate the
