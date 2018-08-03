@@ -30,7 +30,7 @@ class Neuron(object):
 
     def __init__(self, f, fname, cellname):
 
-        self.directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')
+        self.directory = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/')
 
         # cell info
         self.filename = fname
@@ -528,7 +528,60 @@ class Neuron(object):
         plt.plot(t0, fr0)
         plt.plot(t1, fr1)
         plt.show()
+    
+    def psth_horiz(self, binSize=10, binShift=1, pdf=None):
+        ''' Firing rates relative to cue onset for cue predicted reward and
+        no reward (irrespective of spatial location)
+        '''
+        self.get_xy()
+        self.get_xy_grid()
+        self.get_xy_plot_grid()
+        
+        self.smooth_firing_rates()
+        self.get_frmean_by_loc((0.1, 0.5))
+        self.get_fr_by_loc()
+        
+        t = np.mean(np.c_[self.tStart_smooth, self.tEnd_smooth], 1)
 
+        fig, ax = plt.subplots(nrows=2, ncols=1)
+        plt.sca(ax[0])
+        plt.plot(t, self.fr_space[1, :, 4, 0], c=self.rew_colors[0])
+        plt.plot(t, self.fr_space[1, :, 2, 0], c=self.rew_colors[1])
+        plt.ylabel('Firing rate (sp/s)')
+
+        
+        plt.sca(ax[1])
+        count = 1
+        for xi in range(len(self.x)):  
+            for i in np.where(self.df['rew']==1)[0]:
+                if(self.x[xi] > 0):
+                    spks = copy.copy(self.df.ix[i, 'spkdata']-
+                        self.df.ix[i, 't_CUE_ON'])
+                    spks = spks[(spks >= self.tFrame[0]) & (spks <= self.tFrame[1])]
+                    plt.scatter(spks, [count]*len(spks), c=self.rew_colors[1],
+                            marker='|', linewidth=0.1)
+                    count+=1
+                #elif (self.x[ix] < 0):
+
+
+        #for is_rew in range(2):
+        #    for i in np.where(self.df['rew']==is_rew)[0]:
+        #        spks = copy.copy(self.df.ix[i, 'spkdata'] -
+        #                         self.df.ix[i, 't_CUE_ON'])
+        #        spks = spks[(spks >= self.tFrame[0]) & (spks <= self.tFrame[1])]
+        #        plt.scatter(spks, [count]*len(spks), c=self.rew_colors[is_rew],
+        #                    marker='|', linewidth=0.1)
+        #        count += 1
+        plt.xlim(self.tFrame)
+        plt.ylim((0, count))
+        plt.xlabel('Time relative to cue onset (s)')
+        plt.ylabel('Trial #')
+        if pdf:                  
+            pdf.savefig()
+            plt.close()
+        else:
+            plt.show()
+     
     def psth_map(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for each reward condition
         (reward or no reward) and spatial location
@@ -545,7 +598,7 @@ class Neuron(object):
                 plt.plot(t, self.fr_space[1, :, xi, yi],
                          color=self.rew_colors[1], lw=1)
                 plt.plot((0,0), ylim, linestyle='--', color='0.5')
-                #format
+                #format                       
                 plt.title('x=%1.1f, y=%1.1f' % (self.x[xi], self.y[yi]), size=6)
                 if yi == 0:
                     plt.xticks(size=4)
@@ -568,7 +621,7 @@ class Neuron(object):
         fig.tight_layout()
 
         if pdf:
-            pdf.savefig()
+            plt.savefig(pdf, dpi=150)
             plt.close()
         else:
             plt.show()
@@ -598,11 +651,11 @@ class Neuron(object):
                             marker='|', linewidth=0.1)
                 count += 1
         plt.xlim(self.tFrame)
-        plt.ylim((0, count))
+        plt.ylim((0, count))    
         plt.xlabel('Time relative to cue onset (s)')
         plt.ylabel('Trial #')
         if pdf:
-            pdf.savefig()
+            plt.savefig(pdf, dpi=150)
             plt.close()
         else:
             plt.show()
@@ -642,7 +695,7 @@ class Neuron(object):
             plt.ylabel('y (deg)')
         fig.tight_layout()
         if pdf:
-            pdf.savefig()
+            plt.savefig(pdf, dpi=150)
             plt.close()
         else:
             plt.show()
@@ -684,7 +737,7 @@ class Neuron(object):
 
         fig.tight_layout()
         if pdf:
-            pdf.savefig()
+            plt.savefig(pdf, dpi=150)
             plt.close()
         else:
             plt.show()

@@ -23,7 +23,7 @@ class Experiment(object):
         else:
             self.files = OrderedDict()
 
-        self.directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')
+        self.directory = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/')
 
     def add_session(self, f, fname, cells):
         '''Add a session to the dictionary and create the 'Session' object for
@@ -61,7 +61,7 @@ class LoadData(object):
     FUNCTIONALITY: Just loads them
     '''
     def __init__(self):
-        self.directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')
+        self.directory = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/') 
         with open(self.directory + 'mapping_exp.pickle', 'rb') as f:
             self.experiment = pickle.load(f)
 
@@ -103,18 +103,24 @@ class LoadData(object):
         return neuron
 
 
-def demo(one_example=True):
+def demo(elecName=None, one_example=True):
 
     io = LoadData()
     if one_example == True:
         demo_neurons = {'tn_map_123014': ['elec11U']}
     else:
-        demo_neurons = {'tn_map_120914': ['elec10a', 'elec21a'],
-                        'tn_map_123014': ['elec11U', 'elec9U'],
-                        'tn_map_122914': ['elec7U'],
-                        'tn_map_121614': ['elec17U', 'elec3b'],
-                        'tn_map_121214': ['elec13U'],
-                        'tn_map_121114': ['elec11U']}
+        demo_neurons = {'tn_map_120314': [elecName],
+                        'tn_map_120414': [elecName],
+                        'tn_map_120514': [elecName],
+                        'tn_map_120814': [elecName],
+                        'tn_map_120914': [elecName],
+                        'tn_map_121114': [elecName],
+                        'tn_map_121214': [elecName],
+                        'tn_map_121514': [elecName],
+                        'tn_map_121614': [elecName],
+                        'tn_map_121714': [elecName],
+                        'tn_map_122914': [elecName],
+                        'tn_map_123014': [elecName]}
     for file in demo_neurons:
         for cell in demo_neurons[file]:
 
@@ -126,15 +132,19 @@ def demo(one_example=True):
             neuron.get_xy()
             neuron.get_xy_grid()
             neuron.get_xy_plot_grid()
+            
 
+            fileShort ='/Users/aunoyp/Documents/Salzman_Lab/Thesis/Figs/'+ file + '_' + elecName
+            fRew = fileShort + 'rew.pdf'
             # Firing sorted by reward condition (ignoring spatial location)
             neuron.smooth_firing_rates()
-            neuron.psth_rew()
+            neuron.psth_rew(pdf=fRew)
 
+            fmap = fileShort + 'map.pdf'
             # Firing rates for each location in experiment
             neuron.get_frmean_by_loc((.1,.5))
             neuron.get_fr_by_loc()
-            neuron.psth_map()
+            neuron.psth_map(pdf=fmap)
 
             # Use firing rates to determine initial guess paramaters for 2d
             # gaussian fit
@@ -144,18 +154,19 @@ def demo(one_example=True):
             # find a global minimum in this paramater space
             neuron.fit_gaussian()
 
+            fgauss = fileShort + 'gauss.pdf'
             # Get high-res guassian for plotting based on the fitted parameters
             g_nr = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 0,
                                     neuron.betas)
             g_rw = neuron.get_gauss(neuron.x_plot_grid, neuron.y_plot_grid, 1,
                                     neuron.betas)
-            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space)
+            neuron.plot_gaussian([g_nr, g_rw], neuron.frmean_space, pdf=fgauss)
 
 
 def get_file_info():
     # initialize Experiment, and load information
     finfo = sp.io.loadmat(
-        os.path.join(os.getenv('HOME'), 'GitHub/MappingData/src/map_cell_list.mat'),
+        os.path.join(os.sep, 'Volumes/AUNOY_SALZ/src/map_cell_list.mat'), 
         squeeze_me=True
     )
     # changed to zero based inds
@@ -166,7 +177,7 @@ def get_file_info():
 def create_all(overwrite=True):
     ''' Create all Sessions & Neuron objects '''
     finfo = get_file_info()
-    directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/src/')
+    directory = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/src/')
     exp = Experiment(overwrite)
     for iFile, file in enumerate(finfo['filenames']):
         if not file in exp.files or overwrite:
@@ -179,7 +190,7 @@ def create_all(overwrite=True):
 def overwrite_sessions():
     ''' Create all Sessions & Neuron objects '''
     finfo = get_file_info()
-    directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/src/')
+    directory = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/src/')
     for iFile, fname in enumerate(finfo['filenames']):
         f = sp.io.loadmat(directory + fname + '.nex.mat', squeeze_me=True)
         print('Loaded file', fname)
@@ -189,7 +200,7 @@ def overwrite_sessions():
 def load_neurons_and_plot(start_ind=0):
     ''' load all Neuron objects and plot them '''
     io = LoadData()
-    fig_dir = os.path.join(os.getenv('HOME'), 'GitHub/Mapping/figs/')
+    fig_dir = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/figs/')
     for i, file in enumerate(io.experiment.files):
         if i >= start_ind:
             for cell in io.experiment.files[file]:
