@@ -47,8 +47,22 @@ class Neuron(object):
             return
         self.tStart = np.linspace(self.tFrame[0], self.tFrame[1] - self.tInt,
                                   (self.tFrame[1] - self.tFrame[0]) / self.tShift)
+
+        # Chris is saying that the t.Start time is an array that has evenly
+        # spaced numbers over the time interval of {tFrame[0], tFrame[1] - 
+        # self.tInt} with (tFrame[1]-tFrame[0]) / t.Shift elements. 
+        # tFrame[0]= -500 seconds
+        # tFrame[1] = 1500
+        # tShift = self.tInt
+        # self.tInt = 10
+        # This means that the linspace for all neurons is from -500 to 1490
+        # And the number of elements is 2000/10 = 200 elements.
+
         self.tEnd = np.linspace(self.tFrame[0] + self.tInt, self.tFrame[1],
                                 (self.tFrame[1] - self.tFrame[0]) / self.tShift)
+        # Chris is defining here the tEnd to be an evenly spaced interval
+        # of -490 to 1500 and the number of elements are also 200
+
 
         # covert to seconds (floats)
         self.tFrame = [t / 1e3 for t in self.tFrame]
@@ -250,16 +264,23 @@ class Neuron(object):
         with overlapping time windows, but can do this with subsequent call
         to 'smooth_firing_rates'
         '''
+        # Define self.fr -> array of size of trials by 200 bins
         self.fr = np.full((self.df.shape[0], len(self.tStart)), np.nan)
+
+        # so with iterator indices, and spikes
         for ind, spks in self.df['spkdata'].iteritems():
+            # cueOn is equal to the time when the cue is on
             cueOn = self.df['t_CUE_ON'].loc[ind]
-            if not np.isnan(cueOn):
-                start_ind = 0
+            if not np.isnan(cueOn):    # if the cue does not turn on
+                start_ind = 0    # startind is equal to zero
                 end_time = np.nanmin([self.df['t_TARG_ON'].loc[ind] - cueOn,
                                 self.df['t_BREAK_TARG'].loc[ind] - cueOn,
                                 self.df['t_BREAK_CUE'].loc[ind] - cueOn,
                                 self.df['t_TRIAL_END'].loc[ind] - cueOn])
-                for t in range(len(self.tStart)):
+                # end_time is equal to the smallest value of TargOn
+                # Break Targ, Break Cue, or Trial End.
+                # Whatever comes first will be the end time
+                for t in range(len(self.tStart)):    # iterate 200 times
                     # if time frame is after an 'end' event, fr = nan
                     if end_time < self.tEnd[t]:
                         break
@@ -276,7 +297,7 @@ class Neuron(object):
                             nspks +=1
                         curr_ind +=1
                     # compue firing rate
-                    self.fr[ind, t] = nspks / self.tInt
+                    self.fr[ind, t] = nspks / self.tInt # which is nspks / 10 sec int
                     # set the start point for searching for spikes to be first
                     # spike after the current time window
                     start_ind = curr_ind
@@ -529,6 +550,9 @@ class Neuron(object):
         plt.plot(t1, fr1)
         plt.show()
     
+    
+
+
     def psth_horiz(self, binSize=10, binShift=1, pdf=None):
         ''' Firing rates relative to cue onset for cue predicted reward and
         no reward (irrespective of spatial location)
@@ -672,6 +696,7 @@ class Neuron(object):
             zmax = np.nanmax(self.frmean_space[irew,:,:])
             zmin = np.nanmin(self.frmean_space[irew,:,:])
             size = 50 * (self.frmean_space[irew,:,:] - zmin) / (zmax - zmin)
+            print(size / 50 )
             plt.scatter(np.ravel(self.x_grid), np.ravel(self.y_grid),
                         s=np.ravel(size), c=self.rew_colors[irew])
 
