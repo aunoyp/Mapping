@@ -5,6 +5,12 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
+from mapping.experiment import LoadData
+from tqdm import tqdm_notebook as tqdm 
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+import statsmodels.stats.multicomp
+ 
 
 
 class Population(object):
@@ -15,6 +21,7 @@ class Population(object):
     algorithm)
     FUNCTIONALITY: Fits the functions, and saves these results - to be
     utilized by Classifier object
+    Aunoy - Added dataframe to save ANOVA results
     '''
 
     def __init__(self):
@@ -25,6 +32,65 @@ class Population(object):
         self.betas = np.empty((1,))
         self.mse = np.empty((self.ncells,))
 
+    def three_way_ANOVA(self, t_lb=0.1, t_ub=0.5):  # t_lb and t_ub are the upper and lower time bounds
+
+        # Set up the dataframe
+        ANOVA_model_linear = pd.DataFrame(columns=['name', 'ntrials', 'depth',  # This is the linear model
+                                                    'AP', 'ML', 'contra', 'Rew', 'X', 
+                                                    'Y', 'Rew*X', 'Rew*Y', 'X*Y', 'Rew*X*Y'])
+        # Create a counter to index neurons
+        neuN = 0   
+        
+        for file in tqdm(self.io.experiment.files):
+            for cell in tqdm(self.io.experiment.files[file]):
+                # load neuron object
+                #print('Loading neuron', file, cell)
+                neuron = self.io.load_neuron(file, cell)
+                
+                # Set up XY information and calc firing rates
+                neuron.get_xy()
+                neuron.get_xy_grid()
+                neuron.get_xy_plot_grid()
+                
+                x = neuron.x
+                y = neuron.y
+                
+                neuron.smooth_firing_rates()
+                
+                # Only looking at good trials here
+                only_good = neuron.df.loc[neuron.df['hit'] == True]
+                
+                # Fill the dataframe with normal info
+                ANOVA_model_linear.loc[neuN, 'name'] = neuron.name
+                ANOVA_model_linear.loc[neuN, 'ntrials'] = neuron.ntrials
+                ANOVA_model_linear.loc[neuN, 'depth'] = neuron.depth
+                ANOVA_model_linear.loc[neuN, 'AP'] = neuron.AP
+                ANOVA_model_linear.loc[neuN, 'ML'] = neuron.ML
+                ANOVA_model_linear.loc[neuN, 'contra'] = neuron.contra
+                
+                # Get the array to retrive firing rates
+                t = neuron.get_mean_t((t_lb, t_ub))
+                
+                # Get the firing rates and append to only_good dataframe
+                inds = neuron.df['hit'] == True
+                only_good['fr'] = np.mean(neuron.fr[np.ix_(inds, t)], 1)
+                
+                # Fits the model with the interaction term
+                # This will also automatically include the main effects for each factor
+                model = ols('fr ~ C(CUE_TYPE)*C(CUE_X)*C(CUE_Y)', only_good).fit()
+                
+                # Run the anova and save the results in the ANOVA Model dataframe
+                res = sm.stats.anova_lm(model, typ= 2)
+                ANOVA_model_linear.loc[neuN, 'Rew':'Rew*X*Y'] = \
+                        np.ravel(res.loc['C(CUE_TYPE)':'C(CUE_TYPE):C(CUE_X):C(CUE_Y)', 'PR(>F)'])
+                # Increment counter
+                neuN = neuN + 1
+                
+        # Save the dataframe as a pickle object
+        ANOVA_model_linear.to_pickle('ANOVA_linear_late.pickle')
+        self.ANOVA = ANOVA_model_linear
+                
+        
     def fit_gaussians(self, niter=100):
         icell = 0
         for file in self.io.experiment.files:
@@ -52,7 +118,8 @@ class Population(object):
 
     def save_params(self):
         ''' Create a pickle of the neuron object '''
-        directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')
+        directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')        
+        #directory = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/') This was for testing
         fname = 'populations_params'
         print('saving:', directory + fname)
         with open(directory + fname + '.pickle', 'wb') as f:
@@ -62,7 +129,8 @@ class Population(object):
 class PopParams(object):
 
     def __init__(self):
-        self.directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')
+        self.directory = os.path.join(os.getenv('HOME'), 'GitHub/MappingData/')        
+        #self.directory = os.path.join(os.sep, 'Volumes/AUNOY_SALZ/')
         fname = 'model_testng'
         print('saving:', self.directory + fname)
         with open(self.directory + fname + '.pickle', 'rb') as f:
